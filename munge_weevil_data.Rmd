@@ -29,7 +29,7 @@ dropped pellet count since, in this expt, all were feed 2 pellets per observatio
 ### T15-8
 what going on with that expt? in the blacked out cells, there are some data but the last male alive count is "???"
 
-```{r}
+```{r, include = FALSE}
 # get names of sheets that contain pop data (not including T15-8 for now)
 sheet_names <- excel_sheets("weevil_data/pop_dynamics_expt_data.xlsx")
 sheet_pops <- sheet_names[1:5]
@@ -95,10 +95,9 @@ for (i in seq_along(sheet_pops)) {
 }
 
 full_df <- bind_rows(list_dfs)
-full_df %>%
-  mutate_at()
 
-full_df$treatment <- as_factor(full_df$treatment) # for proper facetting when plotting. Should convert to numeric instead.
+full_df <- full_df %>% mutate(replicate = as.numeric(replicate))
+#full_df$treatment <- as_factor(full_df$treatment) # for proper facetting when plotting. Should convert to numeric instead.
 ```
 
 ### now that i've pulled all data sets together, how can I automate data quality checks?
@@ -109,7 +108,7 @@ note, that the observed abundance may not be reported correctly since female cou
 
 ```{r}
 full_df %>%
-  ggplot(aes(x = days, y = total, group = replicate, col = replicate)) +
+  ggplot(aes(x = days, y = total, group = replicate, col = as.factor(replicate) )) +
   geom_line() + 
   facet_wrap(~treatment) +
   theme_light() +
@@ -129,7 +128,7 @@ Why is the 3 % treament so short? It is short because the 3 % experiment was sta
 
 ```{r}
 full_df %>%
-  ggplot(aes(x = date, y = total, group = replicate, col = replicate)) +
+  ggplot(aes(x = date, y = total, group = replicate, col = as.factor(replicate) )) +
   geom_line() + 
   facet_wrap(~treatment) +
   theme_light() +
@@ -144,3 +143,37 @@ full_df %>%
 ```
 
 Interesting. So, it appears that at 0 - 3 % peanut shells, the weevils can reach a carrying capacity (or the stochastic equivalent). At 5 % peanut shells, they *appears* (at least to my eye) some transient oscillations. For the 10 - 15 % peanut shell treatments the trajectories were clearly declining from the start along with some oscillations before crashing.
+
+
+### 0 % peanut shell
+
+```{r}
+spark_list <- lapply(seq_along(pct_peanut_shells),
+                     function(x)
+                       full_df %>%
+  filter(treatment == pct_peanut_shells[x]) %>%
+  ggplot(aes(x = days, y = total)) +
+  geom_line() +
+  labs(title = paste0(pct_peanut_shells[x]*100, " % peanut shell in food pellets")) +
+  facet_wrap(~replicate))
+
+# 0 % peanut shells
+spark_list[[1]]
+```
+
+```{r}
+spark_list[[2]]
+```
+
+```{r}
+spark_list[[3]]
+```
+
+```{r}
+spark_list[[4]]
+```
+
+```{r}
+spark_list[[5]]
+```
+
