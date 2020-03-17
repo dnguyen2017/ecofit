@@ -1,0 +1,80 @@
+---
+title: "markus weevil data"
+author: "David Nguyen"
+date: "March 17, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(readxl)
+```
+
+###
+Are females unobserved or are the counts missing? 
+The sheet "T 10 sex ratios" includes females counts for the 10 % peanut shell experiment that are not included in the "T10" sheet.
+This is problematic, since population growth is likely more limited by females than by males.
+
+```{r}
+# read in data for weevils on "pure" beans
+pure_raw <- read_excel("weevil_data/pop_dynamics_expt_data.xlsx", skip = 3, sheet = 1) #%>% 
+
+# create new colnames
+npop <- 10
+date_cols <- c("days", "date")
+demo_cols <- unlist(lapply(1:npop,
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+treatment_cols <- c("m_added", "f_added", "pellets", "wtf", "treatement")
+
+# assign colnames
+names(pure_raw) <- c(date_cols, demo_cols, treatment_cols)
+
+# make data longer for plotting
+weevil_pure <- pure_raw %>% 
+  select(-pellets, - wtf, -m_added, -f_added) %>% # always 2 pellets a day
+  filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+  pivot_longer(-c(days,date),
+               names_sep = "_",
+               names_to = c("sex", "status", "replicate"),
+               values_to = "count") %>%
+  # original data file did not have totals computed for all days
+  # create new df with totals for all days
+  filter(sex != "total" , status == "alive") %>%
+  group_by(date, replicate) %>%
+  mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+  ungroup()
+
+```
+
+```{r}
+weevil_pure %>%
+  ggplot(aes(x = days, y = total, group = replicate, col = replicate)) +
+  geom_line() + 
+  theme_light() +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(0, 550, by = 50)) +
+  scale_y_continuous(breaks = seq(0, 30, by = 5)) +
+  labs(title = "Bean weevil population counts on 'pure' beans",
+       y = "Bean weevil count",
+       x = "Time (days)")
+```
+
+
+
+```{r, eval = FALSE}
+pure_raw_cnames <- 
+  read_excel("weevil_data/pop_dynamics_expt_data.xlsx", skip = 2, n_max = 1, sheet = 1) %>% 
+  names() 
+
+grepl("^\\...", pure_raw_cnames) 
+gsub("^\\...", NA,pure_raw_cnames) # if string begins with "..." replace it with NA
+
+```
+

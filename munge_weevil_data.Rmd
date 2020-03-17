@@ -1,0 +1,109 @@
+---
+title: "munge population data"
+author: "David Nguyen"
+date: "March 17, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(readxl)
+
+```
+
+###
+Are females unobserved or are the counts missing? 
+The sheet "T 10 sex ratios" includes females counts for the 10 % peanut shell experiment that are not included in the "T10" sheet.
+This is problematic, since population growth is likely more limited by females than by males.
+
+Population T15-8 has 8 weevil population introductions compared to the 5 introduction in other replicates in T15-8. Is this correct?
+
+In the sheets, some of the cols for "alive" have a highlighted header cell that says "pic". What does this mean? were the counts obtained by looking at a picture?
+
+### Dropped data columsn
+the column at the end that has the repeating sequence {a,b,c,d}?
+weevils added <- should re-include in the future. Also, see previous note about T15-8
+dropped pellet count since, in this expt, all were feed 2 pellets per observation day.
+
+### T15-8
+what going on with that expt? in the blacked out cells, there are some data but the last male alive count is "???"
+
+```{r}
+# get names of sheets that contain pop data (not including T15-8 for now)
+sheet_names <- excel_sheets("weevil_data/pop_dynamics_expt_data.xlsx")
+sheet_pops <- sheet_names[1:5]
+
+# create new colnames
+npop <- 10
+date_cols <- c("days", "date")
+demo_cols <- unlist(lapply(1:npop,
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+treatment_cols <- c("m_added", "f_added", "pellets", "noclue", "treatment")
+
+# read-in and reformat all population data sheets
+
+list_dfs <- vector("list", length = length(sheet_pops)) # init list to store each df
+
+# loop to read and reformat
+for (i in seq_along(sheet_pops)) {
+  df_now <-
+    read_excel("weevil_data/pop_dynamics_expt_data.xlsx",
+               skip = 3,
+               sheet = sheet_pops[i]) %>%
+    mutate(treatment = sheet_pops[i])
+  
+  # assign new colnames
+  names(df_now) <-
+    c(date_cols, demo_cols, treatment_cols) # should include check to make sure all data sheets have same format
+  
+  # T15 has weird ??? in a col. CHange to NA and convert col to numeric
+  if (i == 5) {
+    df_now$m_alive_8 <-
+      df_now %>% 
+      mutate_at(vars('m_alive_8'), ~na_if(., '???')) %>%
+      pull(m_alive_8) %>%
+      as.numeric()
+  }
+  
+  # make data longer for plotting
+  df_long <- df_now %>%
+    select(-pellets,-noclue,-m_added,-f_added) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, treatment),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    ungroup()
+  
+  # save to list
+  list_dfs[[i]] <- df_long
+}
+
+full_df <- bind_rows(list_dfs)
+
+```
+
+### now that i've pulled all data sets together, how can I automate data quality checks?
+no clue. need to learn how.
+
+### plot time series
+note, that the observed abundance may not be reported correctly since female counts may have not been included in the data sheets for some reason.
+
+```{r}
+
+```
+
