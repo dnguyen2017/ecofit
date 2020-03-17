@@ -33,6 +33,7 @@ what going on with that expt? in the blacked out cells, there are some data but 
 # get names of sheets that contain pop data (not including T15-8 for now)
 sheet_names <- excel_sheets("weevil_data/pop_dynamics_expt_data.xlsx")
 sheet_pops <- sheet_names[1:5]
+pct_peanut_shells <- c(0, 0.03, 0.05, 0.10, 0.15)
 
 # create new colnames
 npop <- 10
@@ -57,7 +58,7 @@ for (i in seq_along(sheet_pops)) {
     read_excel("weevil_data/pop_dynamics_expt_data.xlsx",
                skip = 3,
                sheet = sheet_pops[i]) %>%
-    mutate(treatment = sheet_pops[i])
+    mutate(treatment = pct_peanut_shells[i])
   
   # assign new colnames
   names(df_now) <-
@@ -94,7 +95,10 @@ for (i in seq_along(sheet_pops)) {
 }
 
 full_df <- bind_rows(list_dfs)
+full_df %>%
+  mutate_at()
 
+full_df$treatment <- as_factor(full_df$treatment) # for proper facetting when plotting. Should convert to numeric instead.
 ```
 
 ### now that i've pulled all data sets together, how can I automate data quality checks?
@@ -104,6 +108,39 @@ no clue. need to learn how.
 note, that the observed abundance may not be reported correctly since female counts may have not been included in the data sheets for some reason.
 
 ```{r}
+full_df %>%
+  ggplot(aes(x = days, y = total, group = replicate, col = replicate)) +
+  geom_line() + 
+  facet_wrap(~treatment) +
+  theme_light() +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(0, 650, by = 100)) +
+  scale_y_continuous(breaks = seq(0, 50, by = 10)) +
+  labs(title = "Bean weevil populations over time",
+       subtitle = "For each plot, weevils were fed pellets with a different proportion of peanut shell additive.\nEach color is a different replicate.",
+       y = "Bean weevil count",
+       x = "Time (days)")
 
 ```
 
+There are some interesting dynamics in the 5 % peanut shell treatment. Are these transient oscillations? 
+
+Why is the 3 % treament so short? It is short because the 3 % experiment was started at a later date. All the experiments ended around the end of April, but most began in early fall. THe 3 % treatment started in March. See the following plot.
+
+```{r}
+full_df %>%
+  ggplot(aes(x = date, y = total, group = replicate, col = replicate)) +
+  geom_line() + 
+  facet_wrap(~treatment) +
+  theme_light() +
+  theme(legend.position = "none") +
+  #scale_x_continuous(breaks = seq(0, 650, by = 100)) +
+  scale_y_continuous(breaks = seq(0, 50, by = 10)) +
+  labs(title = "Bean weevil populations over time",
+       subtitle = "For each plot, weevils were fed pellets with a different proportion of peanut shell additive.\nEach color is a different replicate.",
+       y = "Bean weevil count",
+       x = "Time (days)")
+
+```
+
+Interesting. So, it appears that at 0 - 3 % peanut shells, the weevils can reach a carrying capacity (or the stochastic equivalent). At 5 % peanut shells, they *appears* (at least to my eye) some transient oscillations. For the 10 - 15 % peanut shell treatments the trajectories were clearly declining from the start along with some oscillations before crashing.
