@@ -75,10 +75,10 @@ for (i in seq_along(sheet_pops)) {
   
   # make data longer for plotting
   df_long <- df_now %>%
-    select(-pellets,-noclue,-m_added,-f_added) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
     filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
     pivot_longer(
-      -c(days, date, treatment),
+      -c(days, date, m_added, f_added,treatment),
       names_sep = "_",
       names_to = c("sex", "status", "replicate"),
       values_to = "count"
