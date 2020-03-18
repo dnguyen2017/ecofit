@@ -118,7 +118,7 @@ Note, right now I'm dropping all of the counts of dead individuals. It may be im
 
 # get names of relevant sheets
 control_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[1:3]
-avidin_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[4]
+#avidin_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[4]
 harvest_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[5:6]
 food_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[7:9]
 
@@ -127,63 +127,6 @@ food_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[7:9]
 lower_rep <- c(1, 11, 21)
 upper_rep <- c(10, 20, 30)
 
-date_cols <- c("days", "date")
-
-# note, there are no "TOT" cols in the orignal food data set
-demo_cols_food <- unlist(lapply(lower_rep[1]:upper_rep[1],
-       function(i)
-         c(paste0("m_alive_",i),
-           paste0("f_alive_",i),
-           paste0("m_dead_",i),
-           paste0("f_dead_",i))))
-
-# food treatment cols
-treatment_cols_food <- c("m_added", "f_added", "pellets", "pct_shell", "noclue")
-
-raw_food <- read_excel("weevil_data/ext_data.xlsx", skip = 3, sheet = food_sheets[1]) %>%
-  filter(!is.na(date)) %>% # cut out calculated values at bottom of spreadsheet
-  select(1:47)#-`...48`, -`dead FX for pics`, -`...49`) # remove extraneous cols
-
-names(raw_food) <- c(date_cols, demo_cols_food, treatment_cols_food)
-
-# cut out rows that have calculated values
-if (food_sheets[j] == "XF1_10") raw_food <- raw_food %>% filter(days < 456)
-
-# create new cols for all treatments
-raw_food <- 
-  raw_food %>%
-  mutate(treatment = "food_inc",
-         # pct_shell = 0,
-         avidin = 0,
-         harvest = 0)
-
-# change pct_shell col to numeric following food quality change schedule
-number_pure <- raw_food %>% filter(pct_shell == "pure") %>% nrow() 
-pure_beans <- rep(0, number_pure)
-shell_beans <- rep(0.01 * seq(1,17,by = 1), each = 5)
-pct_shell_treatment <- c(pure_beans, shell_beans)
-remaining_rows <- nrow(raw_food) - length(pct_shell_treatment)
-
-raw_food$pct_shell <- append(pct_shell_treatment, rep(NA, remaining_rows) )
-
-# lengthen data for plotting
-food_df <-
-  raw_food %>%
-    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
-    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
-    pivot_longer(
-      -c(days, date, m_added, f_added,treatment, pct_shell, avidin, harvest),
-      names_sep = "_",
-      names_to = c("sex", "status", "replicate"),
-      values_to = "count"
-    ) %>%
-    # original data file did not have totals computed for all days
-    # create new df with totals for all days
-    filter(sex != "total" , status == "alive") %>%
-    group_by(date, replicate) %>%
-    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
-    fill(m_added, f_added) %>% # fill in rest of zeros
-    ungroup()
 ```
 
 
@@ -256,6 +199,90 @@ ctrl_df %>%
   theme(legend.position = "n")
 
 ```
+
+###
+lots of missing data values in treatment cols. Because of this uncertainty, not even going to look at avidin treatment.
+Also, there are missing values in harvest rates, not sure if I should impute missing values or leave as NA? Also, harvest rates are not consistent with the harvesting schudule laid out in the "schedule" sheet. In the schedule, harvests should start at 0.5 % and increase by 0.5 % every "subsequent sampling day" (does this mean every four days? this doesn't seem correct). In the data sheet there is a beginning period of no harvest, then it increases by 1 % every 20 days (5 observations).
+
+Also, the language in the harvest schedule makes it sound like females *are* countable, since it describes harvesting and equal number of males and females. So where is this data?
+
+```{r}
+list_harvest <- vector("list", length = length(harvest_sheets))
+
+lower_rep <- c(11, 21)
+upper_rep <- c(20, 30)
+for (j in seq_along(harvest_sheets)) {
+  date_cols <- c("days", "date")
+
+  if (harvest_sheets[j] == "XH11-20") {
+    demo_cols_harvest <- unlist(lapply(lower_rep[j]:upper_rep[j],
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+  } else {
+    demo_cols_harvest <- unlist(lapply(lower_rep[j]:upper_rep[j],
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i))))
+  }
+  treatment_cols_ext <- c("m_added", "f_added", "pellets", "harvest", "noclue")
+
+raw_harvest <- read_excel("weevil_data/ext_data.xlsx", skip = 3, sheet = harvest_sheets[j]) %>%
+  filter(!is.na(date) ) # cut out calculated values at bottom of spreadsheet
+  
+  # remove extra col for rep 21 -30 sheet
+  if (harvest_sheets[j] == "XH21-30") raw_harvest <- raw_harvest %>% select(1:47)
+
+names(raw_harvest) <- c(date_cols, demo_cols_harvest, treatment_cols_ext)
+
+# create new cols for all treatments
+raw_harvest <- 
+  raw_harvest %>%
+  mutate(treatment = "harvest",
+         pct_shell = 0,
+         avidin = 0)
+
+# lengthen data for plotting
+list_harvest[[j]] <-
+  raw_harvest %>%
+    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, m_added, f_added,treatment, pct_shell, avidin, harvest),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    fill(m_added, f_added) %>% # fill in rest of zeros
+    ungroup() 
+
+  
+}
+
+harvest_df <- bind_rows(list_harvest) %>% mutate(replicate = as.numeric(replicate))
+
+```
+
+uhh, the harvest lines were never actually pushed to extinction...
+
+```{r}
+harvest_df %>%
+  ggplot(aes(x = days, y = total)) +
+  geom_line() +
+  facet_wrap(~replicate)
+```
+
 
 ```{r}
 # read in sheet
@@ -340,6 +367,15 @@ food_df <- bind_rows(list_food) %>% mutate(replicate = as.numeric(replicate))
 # food_df %>%
 #   ggplot(aes( x = days, y = total, col = as.factor(replicate))) + geom_line()
 ```
+
+```{r}
+ext_df <- bind_rows(harvest_df, food_df, ctrl_df)
+ext_df %>%
+  ggplot(aes(x = days, y = total, col = treatment, group = replicate)) +
+  geom_line() +
+  facet_wrap(~treatment)
+```
+
 
 
 ### now that i've pulled all data sets together, how can I automate data quality checks?
