@@ -9,7 +9,6 @@ output: html_document
 knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(readxl)
-
 ```
 
 ###
@@ -99,6 +98,149 @@ full_df <- bind_rows(list_dfs)
 full_df <- full_df %>% mutate(replicate = as.numeric(replicate))
 #full_df$treatment <- as_factor(full_df$treatment) # for proper facetting when plotting. Should convert to numeric instead.
 ```
+
+to combine the extinction expt data and the pop dynamics data, I will need to change grouping variables.
+There are a couple types of population lines:
++ peanut shell (constant or increasing)
+    ++ there are two sets of 1:10 replicates, one that has constant peanut shell and the other is increasing
+    ++ how should I account for this when merging data together? Ah, maybe adjust the treatment col to have elements in {food_cst, food_inc, harvest, avidin}. Then I could have seperate numeric cols like: pct_shell, harvest_rate, avidin.
++ harvested (increasing)
++ avidin treated (increasing)
+
+Note, right now I'm dropping all of the counts of dead individuals. It may be important information to keep though.
+
+```{r}
+### now lets read and format data from ext_data.xlsx
+### this has 90 times series of weevil abundances split between three groups:
+### control (pure beans, and no harvesting)
+### harvest (10 had linearly-increasing avidin treatment, 20 had linearly increasing harvesting)
+### food    (all had linearly-increasing peanut shell percent)
+
+# get names of relevant sheets
+control_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[1:3]
+avidin_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[4]
+harvest_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[5:6]
+food_sheets <- excel_sheets("weevil_data/ext_data.xlsx")[7:9]
+
+# read in sheet
+# sheets each have replicates 1 - 10, 11 - 20, 21 - 30 
+lower_rep <- c(1, 11, 21)
+upper_rep <- c(10, 20, 30)
+
+date_cols <- c("days", "date")
+demo_cols_10 <- unlist(lapply(lower_rep[1]:upper_rep[1],
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+treatment_cols <- c("m_added", "f_added", "pellets", "noclue")
+
+raw_ctrl_10 <- read_excel("weevil_data/ext_data.xlsx", skip = 3, sheet = control_sheets[1]) %>%
+  filter(!is.na(date) ) # cut out calculated values at bottom of spreadsheet
+
+names(raw_ctrl_10) <- c(date_cols, demo_cols_10, treatment_cols)
+
+# create new cols for all treatments
+raw_ctrl_10 <- 
+  raw_ctrl_10 %>%
+  mutate(treatment = "food_cst",
+         pct_shell = 0,
+         avidin = 0,
+         harvest = 0)
+
+# lengthen data for plotting
+ctrl_10 <-
+  raw_ctrl_10 %>%
+    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, m_added, f_added,treatment, pct_shell, avidin, harvest),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    fill(m_added, f_added) %>% # fill in rest of zeros
+    ungroup() 
+```
+
+```{r read_ext_control}
+# read in sheet
+# sheets each have replicates 1 - 10, 11 - 20, 21 - 30 
+lower_rep <- c(1, 11, 21)
+upper_rep <- c(10, 20, 30)
+
+list_ctrl <- vector("list", length = length(control_sheets))
+
+for (j in seq_along(control_sheets)) {
+  date_cols <- c("days", "date")
+demo_cols_10 <- unlist(lapply(lower_rep[j]:upper_rep[j],
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+treatment_cols <- c("m_added", "f_added", "pellets", "noclue")
+
+raw_ctrl <- read_excel("weevil_data/ext_data.xlsx", skip = 3, sheet = control_sheets[j]) %>%
+  filter(!is.na(date) ) # cut out calculated values at bottom of spreadsheet
+
+names(raw_ctrl) <- c(date_cols, demo_cols_10, treatment_cols)
+
+# create new cols for all treatments
+raw_ctrl <- 
+  raw_ctrl %>%
+  mutate(treatment = "food_cst",
+         pct_shell = 0,
+         avidin = 0,
+         harvest = 0)
+
+# lengthen data for plotting
+list_ctrl[[j]] <-
+  raw_ctrl %>%
+    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, m_added, f_added,treatment, pct_shell, avidin, harvest),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    fill(m_added, f_added) %>% # fill in rest of zeros
+    ungroup() 
+
+  
+}
+
+ctrl_df <- 
+  bind_rows(list_ctrl) %>%
+  filter(!is.na(count), sex == "m") %>% # cut out rows after experiment ended (e.g., no values recorded for male count)
+  mutate(replicate = as.numeric(replicate) )
+```
+
+```{r ext_ctrl_plot}
+ctrl_df %>%
+  ggplot(aes(x = days, y = total, col = as.factor(replicate) )) +
+  geom_line() +
+  theme(legend.position = "n")
+
+```
+
+
 
 ### now that i've pulled all data sets together, how can I automate data quality checks?
 no clue. need to learn how.
