@@ -258,3 +258,65 @@ full_df %>%
   
 ```
 
+### what is the difference between replicate 8 in sheet 5 (15%) and sheet 6 ("T15-8")
+
+```{r}
+# get data from T15-8 and insert into the main data set
+t15_8 <- read_excel("weevil_data/pop_dynamics_expt_data.xlsx",
+               skip = 3,
+               sheet = 6) %>%
+  mutate(treatment = 0.15)
+
+demo_names_8 <- c(paste0("m_alive_",8),
+                  paste0("f_alive_",8),
+                  paste0("total_alive_", 8),
+                  paste0("m_dead_",8),
+                  paste0("f_dead_",8),
+                  paste0("total_dead_",8))
+names(t15_8) <- c(date_cols, demo_names_8, treatment_cols)
+
+t15_8 <- 
+  t15_8 %>%
+  select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, m_added, f_added,treatment),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    ungroup()
+
+setdiff(names(t15_8), names(full_df))
+
+failed_8_range <-
+  full_df %>% 
+  filter(treatment == 0.15, replicate == 8, total > 0) %>% 
+  pull(date) %>%
+  range()
+
+t15_8_range <- t15_8 %>% 
+  filter(total > 0) %>% 
+  pull(date) %>% 
+  range()
+
+subset_8 <- 
+  full_df %>% 
+  filter(treatment == 0.15,
+                   replicate == 8,
+                   date <= failed_8_range[2],
+                   date >= failed_8_range[1]) %>%
+  mutate(which_8 = "failed?")
+
+t15_8 <- t15_8 %>% mutate(which_8 = "successful?")  
+
+rbind(t15_8, subset_8) %>% 
+  ggplot(aes(x = date, y = total, col = which_8)) +
+  geom_line()
+
+```
