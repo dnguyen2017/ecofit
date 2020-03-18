@@ -23,11 +23,11 @@ In the sheets, some of the cols for "alive" have a highlighted header cell that 
 
 ### Dropped data columsn
 the column at the end that has the repeating sequence {a,b,c,d}?
-weevils added <- should re-include in the future. Also, see previous note about T15-8
 dropped pellet count since, in this expt, all were feed 2 pellets per observation day.
 
 ### T15-8
 what going on with that expt? in the blacked out cells, there are some data but the last male alive count is "???"
+Edit - The data in the T15-8 sheet is different than the blacked-out columns in in the "15 %" sheet. The start date of the T15-8 replicate is different between sheets. I *think* that there was some sort of experimental problem with the original replicate 8 for the 15 % treatment, and that the T15-8 is a new replicate line. This explains why the start date in Dec 1st whereas the start dates for all other replicatees in the 15 % treatment began on Oct 25th
 
 ```{r, include = FALSE}
 # get names of sheets that contain pop data (not including T15-8 for now)
@@ -175,5 +175,86 @@ spark_list[[4]]
 
 ```{r}
 spark_list[[5]]
+```
+
+### Sheet 3
+Sheet 3 includes a limited duration of count data for each of the replicates. However, the data shown in Sheet 3 doesn't seem to match up with the data in the treatment specific sheets.
+
+```{r, include = FALSE}
+sheet3 <- 
+  read_excel("weevil_data/pop_dynamics_expt_data.xlsx", sheet = 10, n_max = 21, skip = 2) %>%
+  select(1:39) %>% # bunch of stuff in cols past 40, no clue what it is. Is not used in plots on sheet 3
+  slice(-1) 
+
+sheet3_names <- names(sheet3)
+
+sheet3_names <- gsub("^\\...", NA, sheet3_names) %>% # if string begins with "..." replace it with NA
+  tibble::enframe() %>%
+  fill(value) %>%
+  group_by(value) %>%
+  mutate(index = row_number(),
+         name = paste0(value, "_", index)) %>%
+  pull(name)
+
+names(sheet3) <- sheet3_names
+
+sheet3 <-
+  sheet3 %>%
+  mutate(time_step = row_number()) %>%
+  pivot_longer( -time_step, # contains("_"),
+               names_sep = "_",
+               names_to = c("treatment", "replicate"),
+               values_to = "total") %>% 
+  mutate(treatment = replace(treatment, treatment == "pure", "0.0")) %>%
+  mutate(treatment = as.numeric(treatment)) 
+    
+```
+
+How do the data presented in sheet 3 compare to the data in the treatement specific sheets?
+
+### compare mean count plots
+
+It is obvious that the data are not the same. Sheet 3 shows a transient peak around day ten for the 0.05 and pure treatments which is absent in the treatment specific plot.
+
+```{r}
+# plot of average total in sheet 3
+sheet3 %>%
+  group_by(time_step, treatment) %>%
+  summarize(mean_count = mean(total)) %>%
+  ungroup() %>%
+  ggplot(aes(x = time_step, y = mean_count, group = treatment, col = as.factor(treatment))) +
+  geom_line() + theme(legend.position = "n") +
+  labs(title = "Sheet 3 - mean population count",
+       y = "mean count across replicates",
+       x = "time step (4 days?)")
+
+full_df %>%
+  group_by(treatment, days) %>%
+  summarize(mean_count = mean(total)) %>%
+  ungroup() %>%
+  filter(days <= 4 * 19, treatment != 0.03) %>%
+  ggplot(aes(x = days, y = mean_count, col = as.factor(treatment), group = treatment)) + 
+  geom_line() + theme(legend.position = "n") +
+  labs(title = "mean population count from treatment sheets")
+
+```
+
+```{r}
+sheet3 %>%
+  ggplot(aes(x = time_step, y = total, col = as.factor(treatment), group = replicate)) +
+  geom_line() +
+  facet_wrap(~treatment) +
+  labs(title = "Sheet 3 - population count",
+       y = "weevil count",
+       x = "time step (4 days?)") +
+  theme(legend.position = "n")
+
+full_df %>%
+  filter(days <= 4 * 19, treatment != 0.03) %>%
+  ggplot(aes(x = days, y = total, col = as.factor(treatment), group = replicate)) + 
+  geom_line() +
+  facet_wrap(~treatment) +
+  theme(legend.position = "n")
+  
 ```
 
