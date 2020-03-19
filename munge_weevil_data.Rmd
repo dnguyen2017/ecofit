@@ -109,11 +109,11 @@ full_df %>%
 
 ```
 
-Interesting. So, it appears that at 0 - 3 % peanut shells, the weevils can reach a carrying capacity (or the stochastic equivalent). At 5 % peanut shells, they *appears* (at least to my eye) some transient oscillations that bring weevil populations to, or close to, extinction. For the 10 - 15 % peanut shell treatments the trajectories were clearly declining from the start but had some oscillations before crashing.
+Interesting. So, it appears that at 0 - 3 % peanut shells, the weevils can reach a carrying capacity with maybe stochastic or periodic fluctuations. At 5 % peanut shells, they *appears* (at least to my eye) to create more extreme oscillilations than in ithe 0 - 3 % shell treatments which brought a few populations to extinctinction and many dangerously close to extinction at population troughs. For the 10 - 15 % peanut shell treatments the trajectories were clearly declining from the start but had some oscillations before crashing.
 
 Alaina had a good observation that the 5 % population seemed to have bigger transient peaks than the pure bean populations. She thought maybe this is due to compensatory reproduction by the weevils. She reasoned  that since all the weevils were probably raised on pure beans (need to check this) that maybe when they were put on the 5 % beans that the spikes in population were due to overcompensating fecundity as a stress response to poor quality habitat. I wonder if there is a signal of this in the populations where food quality was slowly decreased over time (or maybe the gradual change wouldn't trigger the stress response?). 
 
-Note that the 3 % shell experiment is short because it was started at a later date than all other experiments, but was ended at the same time as all othger experiments. I'm guessing it was done to check if what the behavior was like between 0 and 5 %. It seems that it was more like the 0 % treatment.
+The 3 % shell experiment is short because it was started at a later date than all other experiments but was ended at the same date. I'm guessing Markus noticed the huge difference in dynamics between 0 and 5 % and wanted to check the behavior intermediate to 0 and 5 %. It seems that 3 % was more like the 0 % treatment than the 5 % treatment.
 
 ```{r eval = FALSE}
 full_df %>%
@@ -409,25 +409,36 @@ food_df <- bind_rows(list_food) %>% mutate(replicate = as.numeric(replicate))
 ```
 
 The ext data file contains the majority of the time series Markus collected. He had two treatments:
-+ linearly increasing harvest on pure beans (20 replicates)
-+ linearly increasing peanut shell percentage without harvesting (30 replicates)
-+ controls on pure bean (30 replicates)
 
-The treatments each had an "acclimation phase" at the beginning for populations to establish. Then the treatments were ramped up linearly.
+* linearly increasing harvest on pure beans (20 replicates)
+
+* linearly increasing peanut shell percentage without harvesting (30 replicates)
+
+* controls on pure bean (30 replicates)
+
+The treatments populations each had an "acclimation phase" in the first 84 days (22 time points) where no treatment was implemented to allow populations to establish. Then the treatments were ramped up linearly. 
+
+In the acclimation phase, all populations were under the same conditions - I think it is quite remarkable how similar all the populations are. It would be interesting to fit models to different durations of the time series to identify at what point we first notice that something is happening to the population. 
+
+This would be particullarly interesting in the food quality degredation treatments since I think it illustrates a gradual forcing in habitat degredation which is a concern for real populations. These data could allow us to pose and answer the question "how long does it take to detect the impact of habitat degredation on population viability?" 
+
+We could also use the constant food quality experiments to figure out if we can predict the time to extinction or quasi-extinction in these decreasing food quality experiments is predictable based on our knowledge of populations in constant food conditions. This could help us understand the use of short time series of population dynamics across a range of habitat quality for determining population feasibility in locations where habitat continues to degrade or to identify ecological "safe zones" for population persistence. As a concrete example, lets say that wind farms are built at bird nesting sites. Using short term data on bird population dynamics, can we use just time series (without individual level survival and reproduction data) to determine population viability and identify limits on wind farm operations that allow for population persistence?
 
 ```{r}
 ext_df <- bind_rows(harvest_df, food_df, ctrl_df)
 ext_df %>%
   ggplot(aes(x = days, y = total, col = as.factor(replicate) )) +
   geom_line() +
+  geom_vline(aes(xintercept = 84)) +
   theme(legend.position = "n") +
   facet_wrap(~treatment, nrow = 3) +
   labs(title = "Extinction experiment time series",
-       y = "weevil abundance")
+       y = "weevil abundance",
+       subtitle = "Before the vertical line conditions were the same across all replicates")
 ```
 
 
-control populations were kept on pure (0 % peanut shell) beans. As with data we looked at earlier, populations on pure bean reach a stochastic carrying capacity.
+As with data we looked at earlier, populations on pure bean reach a stochastic carrying capacity.
 
 ```{r}
 ctrl_df %>%
@@ -440,9 +451,9 @@ ctrl_df %>%
 
 
 Hmm, the harvest lines were never actually pushed to extinction...
-I believe the harvests were done every 4 days. Depending on the generation times of weevils, we maybe wouldn't theoretically expect them to go extinct under proportional quota harvesting, especially considering that harvesting never exceeded 17 %.
+From what I can tell, the harvests were done every 4 days. Depending on the generation times of weevils, we maybe wouldn't theoretically expect them to go extinct under proportional quota harvesting, especially considering that harvesting never exceeded 17 %.
 
-There are only 20 replicates in this treatment because the first ten (Sheet labeled "XH1-10") were not actually harvesting treatment. That sheet had a treatment labelled avidin, which, from cursory googling appears I believe is an alternative way that Markus tried to reduce food quality. (Avidin is a type of glycoprotein that binds biotin. So, when added to stored grains, there is less nutrient bioavailibity for pests like these cowpea weevils). I did haven't cleaned up that data yet, since there are a lot of missing data in that sheet (e.g., missing entries for avidin treatment amount, the units of the avidin treatment...)
+There are only 20 replicates in this treatment because the first ten (Sheet labeled "XH1-10") were not actually harvesting treatment. That sheet had a treatment labelled avidin, which, from cursory googling appears I believe is an alternative way that Markus tried to reduce food quality. (Avidin is a type of glycoprotein that binds biotin. So, when added to stored grains, there is less nutrient bioavailibity for pests like these cowpea weevils. This decreases insect growth). I did haven't cleaned up the avidin data yet, since there are a lot of missing data in that sheet (e.g., missing entries for avidin treatment amount, the units of the avidin treatment...)
 
 ```{r}
 harvest_df %>%
@@ -455,7 +466,8 @@ harvest_df %>%
        subtitle = "red lines denote the percent harvest")
 ```
 
-Food quality experiments. The percentage of peanut shells increased (i.e., food quality decreased) over time in these experiments. These populations actually crashed, unlike in the harvesting experiments. It would be interesting to see if we can use parameter estimates from the constant food quality experiments to predict how weevils responsed to this increasing decline in food quality. Could be relevent for people that are trying to study how populations respond to climate change or habitat degredation.
+The percentage of peanut shells increased (i.e., food quality decreased) over time in the food quality experiments. These populations actually crashed unlike the harvested populations. 
+<!-- It would be interesting to see if we can use parameter estimates from the constant food quality experiments to predict how weevils responsed to this increasing decline in food quality. Could be relevent for people that are trying to study how populations respond to climate change or habitat degredation. -->
 
 Hmm, visually it doesn't look like these populations have the same "spikes" at the beginning like the weevils on constant 5 % peanut shell did. This could mean that those spikes were nothing, or that they only happen when weevils experience a sudden change in bean quality. Not sure...
 
@@ -473,7 +485,7 @@ food_df %>%
 
 ### Data quality issues
 
-### Sheet 3
+### Sheet 3 in "pop dynamics expt data"
 Sheet 3 includes a limited duration of count data for each of the replicates. However, the data shown in Sheet 3 doesn't seem to match up with the data in the treatment specific sheets. Markus made two plots in Sheet 3, one that was the average population abundance for the different treatments and the second had each replicate plotted seperately. Here, I reproduce the two plots using either the data shown in Sheet 3 or the data from the treatment specific sheets in the "pop dynamics expt data.xlsx"
 
 ```{r, include = FALSE}
@@ -547,14 +559,11 @@ full_df %>%
   ggplot(aes(x = days, y = total, col = as.factor(treatment), group = replicate)) + 
   geom_line() +
   facet_wrap(~treatment) +
-  theme(legend.position = "n")
+  theme(legend.position = "n") +
+  labs(title = "population count from treatment sheets")
   
 ```
 
-### what is the difference between replicate 8 in sheet 5 (15%) and sheet 6 ("T15-8")
-In sheet 5 replicate 8 was censored (filled in black, but there was still some data in the cols. The last entry for male count was "???"). There is a seperate sheet that is labeled as the 15 % treatment replicate 8. However, the data is clearly different and they were run at different dates.
-
-Presumably something weird happened to the orignal 8th replicate that caused Markus to discard it. However, some thing weird about the "new" 8th replicate is that the weevil additions (that happen at the beginning of all populations) happened 8 times instead of 5 times like all other replicates. Was this just a typo, or was there some reason that this changed?
 
 ```{r include = FALSE}
 # get data from T15-8 and insert into the main data set
@@ -607,29 +616,49 @@ subset_8 <-
                    replicate == 8,
                    date <= failed_8_range[2],
                    date >= failed_8_range[1]) %>%
-  mutate(which_8 = "failed?")
+  mutate(which_8 = "1st replicate 8")
 
-t15_8 <- t15_8 %>% mutate(which_8 = "successful?")  
-
-rbind(t15_8, subset_8) %>% 
-  ggplot(aes(x = date, y = total, col = which_8)) +
-  geom_line()
+t15_8 <- t15_8 %>% mutate(which_8 = "2nd replicate 8")  
 
 ```
 
+### what is the difference between replicate 8 in sheet 5 (15%) and sheet 6 ("T15-8") from "pop dynamics expt data"
+In sheet 5 replicate 8 was censored (filled in black, but there was still some data in the cols. The last entry for male count was "???"). There is a seperate sheet that is labeled as the 15 % treatment replicate 8. However, the data is clearly different and they were run at different dates.
+
+Presumably something weird happened to the orignal 8th replicate that caused Markus to discard it. However, some thing weird about the "new" 8th replicate is that the weevil additions (that happen at the beginning of all populations) happened 8 times instead of 5 times like all other replicates. Was this just a typo, or was there some reason that this was done?
+
+```{r}
+rbind(t15_8, subset_8) %>% 
+  ggplot(aes(x = date, y = total, col = which_8)) +
+  geom_line() +
+  #theme(legend.title = element_blank()) +
+  theme(legend.position = "n") +
+  labs(title = "comparison of the different 15 % replicate 8 data",
+       subtitle = "The first rep. 8 was abandoned (the final data entry is '???')\nThe second rep. 8 was started soon after, but recieved 8 instead of 5 weevil additions")
+
+```
+
+
+
 ### Rambling questions and thoughts about data
-Are females unobserved or are the counts missing? 
-The sheet "T 10 sex ratios" includes females counts for the 10 % peanut shell experiment that are not included in the "T10" sheet.
-This is problematic, since population growth is likely more limited by females than by males.
 
-now that i've pulled all data sets together, how can I automate data quality checks? no clue. need to learn how.
+* Are females unobserved or are the counts missing? 
+    + for all the replicates, female counts are missing past the first or first few time points
+    + The sheet "T 10 sex ratios" includes females counts for the 10 % peanut shell experiment that are not included in the "T10" sheet.
+    + Also, the language in the harvest schedule makes it sound like females *are* countable, since it describes harvesting and equal number of males and females. So where is this data?
+    + This is problematic, since population growth is likely more limited by females than by males.
 
-Population T15-8 has 8 weevil population introductions compared to the 5 introduction in other replicates in T15-8. Is this correct?
 
-In the sheets, some of the cols for "alive" have a highlighted header cell that says "pic". What does this mean? were the counts obtained by looking at a picture?
+<!-- * now that i've pulled all data sets together, how can I automate data quality checks? no clue. need to learn how. -->
 
-what is the column at the end that has the repeating sequence {a,b,c,d}?
-I dropped the pellet count column since, in all expt, weevils were feed 2 pellets per observation day.
+* Population T15-8 has 8 weevil population introductions compared to the 5 introduction in other replicates in T15-8. Is this correct?
+
+<!-- In the sheets, some of the cols for "alive" have a highlighted header cell that says "pic". What does this mean? were the counts obtained by looking at a picture? -->
+
+* dropped data columns
+    + Dropped the column at the end that has the repeating sequence {a,b,c,d}? I think it has something to do with "sampling day (envelope)" which is the first column in the "schedule" sheet of the "ext data" file.
+    + I dropped the pellet count column since, in all expt, weevils were feed 2 pellets per observation day.
+    + I've also dropped counts of dead individuals. This may be important information to keep since it would allow us to check if these time series are a census of (at least male) weevils.
 
 **T15-8**
 what going on with that expt? in the blacked out cells, there are some data but the last male alive count is "???"
@@ -639,15 +668,13 @@ Edit - The data in the T15-8 sheet is different than the blacked-out columns in 
 lots of missing data values in treatment cols. Because of this uncertainty, not even going to look at avidin treatment.
 Also, there are missing values in harvest rates, not sure if I should impute missing values or leave as NA? Also, harvest rates are not consistent with the harvesting schudule laid out in the "schedule" sheet. In the schedule, harvests should start at 0.5 % and increase by 0.5 % every "subsequent sampling day" (does this mean every four days? this doesn't seem correct). In the data sheet there is a beginning period of no harvest, then it increases by 1 % every 20 days (5 observations).
 
-Also, the language in the harvest schedule makes it sound like females *are* countable, since it describes harvesting and equal number of males and females. So where is this data?
+<!-- **data formatting** -->
+<!-- to combine the extinction expt data and the pop dynamics data, I will need to change grouping variables. -->
+<!-- There are a couple types of population lines: -->
+<!-- + peanut shell (constant or increasing) -->
+<!--     ++ there are two sets of 1:10 replicates, one that has constant peanut shell and the other is increasing -->
+<!--     ++ how should I account for this when merging data together? Ah, maybe adjust the treatment col to have elements in {food_cst, food_inc, harvest, avidin}. Then I could have seperate numeric cols like: pct_shell, harvest_rate, avidin. -->
+<!-- + harvested (increasing) -->
+<!-- + avidin treated (increasing) -->
 
-**data formatting**
-to combine the extinction expt data and the pop dynamics data, I will need to change grouping variables.
-There are a couple types of population lines:
-+ peanut shell (constant or increasing)
-    ++ there are two sets of 1:10 replicates, one that has constant peanut shell and the other is increasing
-    ++ how should I account for this when merging data together? Ah, maybe adjust the treatment col to have elements in {food_cst, food_inc, harvest, avidin}. Then I could have seperate numeric cols like: pct_shell, harvest_rate, avidin.
-+ harvested (increasing)
-+ avidin treated (increasing)
-
-Note, right now I'm dropping all of the counts of dead individuals. It may be important information to keep though.
+<!-- Note, right now I'm dropping all of the counts of dead individuals. It may be important information to keep though. -->
