@@ -178,6 +178,34 @@ spark_list[[4]]
 spark_list[[5]]
 ```
 
+### phase space
+Lets take a look at the timeseries in phase space.
+
+```{r phase_space, eval = FALSE}
+# might be useful in the future
+# max(full_df$total)
+
+phase_list <- lapply(seq_along(pct_peanut_shells),
+                     function(x)
+                       full_df %>%
+  filter(treatment == pct_peanut_shells[x]) %>%
+  ggplot(aes(x = lag(total), y = total)) +
+  geom_path() +
+   scale_y_continuous(#breaks = seq(0, spark_lims$max_total, by = 2*inc_total),
+                      limits = c(0, 55)) +
+   scale_x_continuous(#breaks = seq(0, spark_lims$max_days, by = 2*inc_days),
+                      limits = c(0, 55)) +
+  labs(title = paste0(pct_peanut_shells[x]*100, " % peanut shell in food pellets")) +
+  facet_wrap(~replicate))
+
+phase_list[[1]]
+phase_list[[2]]
+phase_list[[3]]
+phase_list[[4]]
+phase_list[[5]]
+```
+
+
 ### plot time series from "ext data""
 
 
