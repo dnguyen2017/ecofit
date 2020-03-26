@@ -1,0 +1,166 @@
+---
+title: "weevil life history data"
+author: "David Nguyen"
+date: "March 26, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(readxl)
+```
+
+```{r pure_known_fate, include= FALSE}
+excel_sheets("weevil_data/LH data records.xlsx")
+pure_lh_raw <- read_excel("weevil_data/LH data records.xlsx",
+           sheet = "all pure data")# %>% 
+  # all excel data converted to excel numeric dates
+  # mutate to change all back to real dates
+pure_lh <- 
+  pure_lh_raw %>%
+  mutate(egg_date = janitor::excel_numeric_to_date(egg.laid),
+         emerge_date = janitor::excel_numeric_to_date(as.numeric(emerged) ),
+         death_date = janitor::excel_numeric_to_date(as.numeric(adult.dies) )) %>% 
+  select(ID,gender, egg_date, emerge_date, death_date) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date)) 
+
+# create encounter history col for known-fate analysis
+kf_pure <- pure_lh %>%
+  mutate(max_lifetime = max(lifetime, na.rm = TRUE)) %>%
+  rowwise() %>% # rowwise makes var called by mutate row-specific (much handier  than group_by on the row number)
+  # in this mutate, i create a vector of 1s for all days alive and 0s to pad days dead (up to max_lifetime)
+  # then paste together and collapse into a string
+  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), rep(0, length.out = (max_lifetime - lifetime) )), # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
+                                collapse = ","),
+         pct_shell = 0) %>%
+  filter(!is.na(death_date)) %>% # remove rows where death date is missing (these weevils were sacrificed)
+  select(ID, 
+         encounter_hist, 
+         gender, pct_shell) # include 2 covariates
+
+# what's up with NAs
+# i think they are either: never emerged or were sacrificed
+pure_lh_raw %>%
+  filter(is.na(emerged) | sacrifice == 1) %>%
+  select(ID, egg.laid, emerged, adult.dies, sacrifice) %>%
+  nrow()
+  
+```
+
+```{r}
+# make something to export as inp
+kf_pure %>%
+  mutate(ch = str_replace_all(encounter_hist, pattern = ",", replace = ""),
+         comment_id = paste("/*",ID,"*/", sep = ""),
+         freq = 1,
+         sex = case_when(gender == "f" ~ 0,
+                         gender == "m" ~ 1),
+         end_line = ";") %>%
+  # inp format
+  # /* ID */ capture history, freq of observed history, covariates;
+  select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
+  #write.table(file= "weevil_data/kf_pure.csv")
+  write_delim(path = "weevil_data/kf_pure.inp",
+            col_names = FALSE) # by default, write_delim makes a " " delimited txt file
+
+# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
+RMark::convert.inp("weevil_data/kf_pure.inp",
+                   covariates = c("sex", "pct_shell"),
+                   use.comments = TRUE) # uses comments as row names
+```
+
+### need to compare pure bean weevils to the data from all pure sheet
+
+```{r}
+#  try to do the same for "pure f" sheet, which (i think?) has life history data for all treatments
+# it does have > 800rows... so maybe it is all of them?
+raw_pure_f <- read_excel("weevil_data/LH data records.xlsx",
+           sheet = "pure f") %>%
+  # this filter remove a ton of rows (i think because many of the laid eggs never emerge?)
+  # need to check this carefully
+  filter(!is.na(egg.laid), # drop any rows without date for egg laying, emergence, or adult death
+           !is.na(emerged),
+           !is.na(adult.dies),
+         gender %in% c("f","m")) # sometimes has "2 ind" or NA
+
+# # fix error in data sheet. change 1900-01-25 to 2011-01-25
+wrong_date <- raw_pure_f %>% pull(egg.laid) %>% unique() %>% min(na.rm = TRUE)
+# correct_date <- wrong_date$year + 111
+# temp <- as.POSIXlt(wrong_date)
+# temp$year <- as.POSIXlt(wrong_date)$year + 111 # change 1900 into 2011 (technically, we're adding 0 + 111 here, since 1900 is indexed as 0)
+raw_pure_f <-
+  raw_pure_f %>% mutate(egg.laid = case_when(egg.laid == wrong_date ~ as.POSIXct("2011-01-25"), # wrong timezone (CST instead of UTC)
+                                           egg.laid != wrong_date ~ egg.laid),
+                      egg.laid = as.Date(egg.laid))
+                         
+
+# emerged and adult.dies were read in as characters, need to fix to remove remaining NAs
+lh_data <- 
+  raw_pure_f %>%
+  # correct format of dates
+  mutate(egg_date = egg.laid,#already in correct format
+         emerge_date = janitor::excel_numeric_to_date(as.numeric(emerged) ),
+         death_date = janitor::excel_numeric_to_date(as.numeric(adult.dies) )) %>%
+  # standardize bean types
+  mutate(Beantype = case_when(Beantype == "pure" ~ "0",
+                              Beantype != "pure" ~ Beantype),
+         pct_shell = 100 * as.numeric(Beantype)) %>%
+  select(ID, pct_shell, gender, egg_date, emerge_date, death_date)
+
+lh_data %>%
+  filter(!is.na(death_date),
+         death_date != as.Date("1927-05-17") ) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date),
+         max_lifetime = max(lifetime, na.rm = TRUE),
+         dead_time = (max_lifetime - lifetime)) %>%
+  rowwise() %>% 
+  # in this mutate, i create a vector of 1s for all days alive and 0s to pad days dead (up to max_lifetime)
+  # then paste together and collapse into a string
+  # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
+  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), rep(0, length.out = (max_lifetime - lifetime) )), 
+                                collapse = ",")) %>%
+  select(ID, 
+         encounter_hist, 
+         gender, pct_shell) %>%
+  # make into inp format
+  mutate(ch = str_replace_all(encounter_hist, pattern = ",", replace = ""),
+         comment_id = paste("/*",ID,"*/", sep = ""),
+         freq = 1,
+         sex = case_when(gender == "f" ~ 0,
+                         gender == "m" ~ 1),
+         end_line = ";") %>%
+  # inp format
+  # /* ID */ capture history, freq of observed history, covariates;
+  select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
+    write_delim(path = "weevil_data/kf_pure_f.inp",
+            col_names = FALSE) # by default, write_delim makes a " " delimited txt file
+
+# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
+RMark::convert.inp("weevil_data/kf_pure_f.inp",
+                   covariates = c("sex", "pct_shell"),
+                   use.comments = TRUE) # uses comments as row names
+```
+
+```{r}
+# make something to export as inp
+kf_pure %>%
+  mutate(ch = str_replace_all(encounter_hist, pattern = ",", replace = ""),
+         comment_id = paste("/*",ID,"*/", sep = ""),
+         freq = 1,
+         sex = case_when(gender == "f" ~ 0,
+                         gender == "m" ~ 1),
+         end_line = ";") %>%
+  # inp format
+  # /* ID */ capture history, freq of observed history, covariates;
+  select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
+  #write.table(file= "weevil_data/kf_pure.csv")
+  write_delim(path = "weevil_data/kf_pure.inp",
+            col_names = FALSE) # by default, write_delim makes a " " delimited txt file
+
+# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
+RMark::convert.inp("weevil_data/kf_pure.inp",
+                   covariates = c("sex", "pct_shell"),
+                   use.comments = TRUE) # uses comments as row names
+```
+
+
