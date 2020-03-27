@@ -122,8 +122,8 @@ lh_data %>%
   # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
   mutate(encounter_hist = paste(c(rep(c(1,0), times = lifetime), # days alive
                                 c(1,1), # death day
-                                rep(c(0,0), length.out = (max_lifetime - lifetime)))), # days censored
-                                collapse = ",") %>%
+                                rep(c(0,0), times = (max_lifetime - lifetime))), # days censored
+                                collapse = ",")) %>%
   select(ID, 
          encounter_hist, 
          gender, pct_shell) %>%
@@ -146,6 +146,7 @@ RMark::convert.inp("weevil_data/kf_pure_f.inp",
                    use.comments = TRUE) # uses comments as row names
 ```
 
+
 ```{r run_known_fate, include = FALSE}
 library(RMark)
 weevil_kf <- convert.inp("weevil_data/kf_pure_f.inp",
@@ -158,6 +159,7 @@ weevil.Mark <- function () {
   S.shell <- list( formula = ~ pct_shell, link = "logit" )        # S(percent peanut shell)
   S.sex <- list(formula = ~ sex, link = "logit")                  # S(sex of weevil)
   S.sexshell <- list(formula = ~ sex + pct_shell, link = "logit")
+  S.time <- list(formula = ~ time, link = "logit")
   
   weevil.models <- create.model.list( "Known" )
   
@@ -217,6 +219,15 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.ch
   geom_line(size = 2) +
   geom_ribbon(aes(x = pct_shell, ymin = lcl, ymax = ucl, fill = model), alpha = 0.5) +
   facet_wrap(~model)
+```
+
+```{r}
+# time model
+time.predict <- covariate.predictions( weevil.results$S.time, # choose model
+                                           indices = 1, data = expand_grid(time = seq(0, 20, by = 1),
+                                                                           sex = c(0,1),
+                                                                           pct_shell = seq(0, 20, by = 5)) )
+time.predict$estimates
 ```
 
 
