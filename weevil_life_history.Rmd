@@ -11,7 +11,6 @@ library(tidyverse)
 library(readxl)
 ```
 
-### need to compare pure bean weevils to the data from all pure sheet
 
 ```{r, include = FALSE}
 #  try to do the same for "pure f" sheet, which (i think?) has life history data for all treatments
@@ -166,7 +165,7 @@ weevil.results <- weevil.Mark()
 ```{r surv_model_comparison}
 weevil.results$model.table %>%
   select(model, AICc, DeltaAICc, weight, Deviance, npar) %>%
-  rename("Model" = model, "Weight" = weight, "parameters" = npar) %>%
+  rename("Model" = model, "Weight" = weight, "Parameters" = npar) %>%
   remove_rownames() %>%
   #tibble()
   knitr::kable(digits = 2)
@@ -220,6 +219,19 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.ch
        y = "Estimated daily survival (95 % CI)") +
   theme(legend.position = "n")
 ```
+
+### Thoughts
+It is clear that the sex of adult weevils has an effect on survival and that resource quality doesn't much of an effect on survival. We should expect that females will have lower survival than males since they allocate more resources to reproduction. However, I think it is interesting that resource quality has such a weak effect on survival since weevils don't require food after emerging as adults so adult weevils rely almost entirely on what they ingested as larvae.
+
+The next step is to investigate:
+
+* development time using Kaplan-Meier analysis;
+* eclosion success using logistic regression;
+* egg laying using poisson regression;
+
+as functions of food quality. 
+
+Using these vital rate estimates I can construct population projection matrices.
 
 ```{r, eval = FALSE}
 # time model
