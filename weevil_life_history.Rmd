@@ -137,6 +137,7 @@ lh_data %>%
   # inp format
   # /* ID */ capture history, freq of observed history, covariates;
   select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
+  filter(pct_shell != 20) %>% # drop data since on 2 observations at 20% shell
     write_delim(path = "weevil_data/kf_pure_f.inp",
             col_names = FALSE) # by default, write_delim makes a " " delimited txt file
 
@@ -159,7 +160,7 @@ weevil.Mark <- function () {
   S.shell <- list( formula = ~ pct_shell, link = "logit" )        # S(percent peanut shell)
   S.sex <- list(formula = ~ sex, link = "logit")                  # S(sex of weevil)
   S.sexshell <- list(formula = ~ sex + pct_shell, link = "logit")
-  S.time <- list(formula = ~ time, link = "logit")
+  #S.time <- list(formula = ~ time, link = "logit")
   
   weevil.models <- create.model.list( "Known" )
   
@@ -170,6 +171,7 @@ weevil.Mark <- function () {
 }
 
 weevil.results <- weevil.Mark()
+
 ```
 
 ```{r surv_model_comparison}
@@ -184,7 +186,7 @@ males should have a higher survival probability than females. Yet the model is p
 ```{r surv_estimates}
 # make data for predictions
 pred_data <- expand_grid(sex = c(0, 1),
-                    pct_shell = seq(0, 20, by = 5))
+                    pct_shell = seq(0, 15, by = 5))
 
 # Generate model predictions
 # use covariate.predictions (indices = 1) to predict survival
@@ -217,6 +219,7 @@ pred_plot <- do.call(rbind, lapply (names(pred_list), function(x) data.frame(pre
 # Create plot of model predictions, with 95% CI
 ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.character(sex) )) +
   geom_line(size = 2) +
+  ylim(0.75,1) +
   geom_ribbon(aes(x = pct_shell, ymin = lcl, ymax = ucl, fill = model), alpha = 0.5) +
   facet_wrap(~model)
 ```
@@ -224,7 +227,7 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.ch
 ```{r}
 # time model
 time.predict <- covariate.predictions( weevil.results$S.time, # choose model
-                                           indices = 1, data = expand_grid(time = seq(0, 20, by = 1),
+                                           indices = 1, data = expand_grid(time = seq(0, 15, by = 1),
                                                                            sex = c(0,1),
                                                                            pct_shell = seq(0, 20, by = 5)) )
 time.predict$estimates
@@ -259,25 +262,10 @@ lh_data %>%
   #geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
 ```
 
-### do model predictions "by hand"
 
 ```{r}
-inverse.logit <- function (x) {exp(x)/(1 + exp(x))}
-
-# look at parameters for sex model
-weevil.results$S.sex$results$beta %>%
-  rownames_to_column("parameter") %>%
-  mutate(real_estimate = invers.logit(estimate)) %>%
-  summarize(female_surv = cumsum(real_estimate)[1], # intercept
-            male_surv = cumsum(real_estimate)[2])   # intercept + male
-
-
-
-```
-
-
-```{r}
-rm( list = ls( all = TRUE ) )
-cleanup( ask = FALSE )
+# clean up temp files created by MARK
+rm(list = ls())
+RMark::cleanup( ask = FALSE )
 ```
 
