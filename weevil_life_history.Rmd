@@ -117,7 +117,8 @@ lh_data %>%
   # in this mutate, i create a vector of 1s for all days alive and 0s to pad days dead (up to max_lifetime)
   # then paste together and collapse into a string
   # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
-  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), rep(0, length.out = (max_lifetime - lifetime) )), 
+  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), # days alive
+                                  rep(0, length.out = (max_lifetime - lifetime + 1) )), # days dead (need to add an extra zero so there are no encounter histories of just 1s) 
                                 collapse = ",")) %>%
   select(ID, 
          encounter_hist, 
@@ -141,26 +142,127 @@ RMark::convert.inp("weevil_data/kf_pure_f.inp",
                    use.comments = TRUE) # uses comments as row names
 ```
 
-```{r}
-# make something to export as inp
-kf_pure %>%
-  mutate(ch = str_replace_all(encounter_hist, pattern = ",", replace = ""),
-         comment_id = paste("/*",ID,"*/", sep = ""),
-         freq = 1,
-         sex = case_when(gender == "f" ~ 0,
-                         gender == "m" ~ 1),
-         end_line = ";") %>%
-  # inp format
-  # /* ID */ capture history, freq of observed history, covariates;
-  select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
-  #write.table(file= "weevil_data/kf_pure.csv")
-  write_delim(path = "weevil_data/kf_pure.inp",
-            col_names = FALSE) # by default, write_delim makes a " " delimited txt file
-
-# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
-RMark::convert.inp("weevil_data/kf_pure.inp",
+```{r run_known_fate, include = FALSE}
+library(RMark)
+weevil_kf <- convert.inp("weevil_data/kf_pure_f.inp",
                    covariates = c("sex", "pct_shell"),
                    use.comments = TRUE) # uses comments as row names
+
+weevil.Mark <- function () {
+  
+  S.dot <- list( formula = ~ 1, link = "logit" )                  # S(.) constant survival
+  S.shell <- list( formula = ~ pct_shell, link = "logit" )        # S(percent peanut shell)
+  S.sex <- list(formula = ~ sex, link = "logit")                  # S(sex of weevil)
+  S.sexshell <- list(formula = ~ sex + pct_shell, link = "logit")
+  
+  weevil.models <- create.model.list( "Known" )
+  
+  weevil.fits <- mark.wrapper( model.list = weevil.models, 
+                                 data = weevil_kf, model="Known" )
+  return( weevil.fits )
+
+}
+
+weevil.results <- weevil.Mark()
 ```
 
+```{r surv_model_comparison}
+weevil.results                                                          
+# lapply( weevil.results[ 1:4 ], 
+#         function( .mark ) .mark$results$beta )    # Parameter estimates
+```
+
+### problem with survival estimates
+males should have a higher survival probability than females. Yet the model is predicting the opposite. Females are coded as 0 and males are 1.
+
+```{r surv_estimates}
+# make data for predictions
+pred_data <- expand_grid(sex = c(0, 1),
+                    pct_shell = seq(0, 20, by = 5))
+
+# Generate model predictions
+# use covariate.predictions (indices = 1) to predict survival
+intercept.predict <- covariate.predictions( weevil.results$S.dot, # choose model
+                                           indices = 1, data = pred_data )
+
+shell.predict <- covariate.predictions( weevil.results$S.shell, 
+                                       indices = 1, data = pred_data )
+
+sex.predict <- covariate.predictions( weevil.results$S.sex, 
+                                       indices = 1, data = pred_data )
+
+sexshell.predict <- covariate.predictions( weevil.results$S.sexshell, 
+                                       indices = 1, data = pred_data )
+
+averaged.predict <- covariate.predictions(weevil.results, # averaged model estimates by weight
+                                        indices = 1, data = pred_data)
+# combine predictions into a single df
+pred_list <- 
+  list(intercept.predict$estimates,
+shell.predict$estimates,
+sex.predict$estimates,
+sexshell.predict$estimates,
+averaged.predict$estimates)
+names(pred_list) <- c("intercept", "shell", "sex", "sex + shell", "averaged")
+
+pred_plot <- do.call(rbind, lapply (names(pred_list), function(x) data.frame(pred_list[[x]], model = x)) ) %>%
+  select(model, sex, pct_shell, estimate, lcl, ucl)
+
+# Create plot of model predictions, with 95% CI
+ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.character(sex) )) +
+  geom_line(size = 2) +
+  geom_ribbon(aes(x = pct_shell, ymin = lcl, ymax = ucl, fill = model), alpha = 0.5) +
+  facet_wrap(~model)
+```
+
+
+```{r lifetime_plot}
+lh_data %>%
+  filter(!is.na(death_date),
+         death_date != as.Date("1927-05-17") ) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date)) %>%
+  group_by(pct_shell, gender) %>%
+  mutate(mean_lifetime = mean(lifetime)) %>%
+  #ungroup() %>%
+  ggplot() +
+  geom_jitter(aes(x = pct_shell, y = lifetime, col = gender)) +
+  geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
+  # geom_jitter(aes(x = gender, y = lifetime)) +
+  # geom_point(aes(x = gender, y = mean_lifetime), col = "red", size = 2) +
+  # facet_wrap(~pct_shell)
+
+lh_data %>%
+  filter(!is.na(death_date),
+         death_date != as.Date("1927-05-17") ) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date),
+         daily_death = 1/lifetime) %>%
+  # group_by(pct_shell, gender) %>%
+  # mutate(mean_lifetime = mean(lifetime)) %>%
+  # ungroup() %>%
+  ggplot() +
+  geom_jitter(aes(x = pct_shell, y = daily_death, col = gender)) 
+  #geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
+```
+
+### do model predictions "by hand"
+
+```{r}
+inverse.logit <- function (x) {exp(x)/(1 + exp(x))}
+
+# look at parameters for sex model
+weevil.results$S.sex$results$beta %>%
+  rownames_to_column("parameter") %>%
+  mutate(real_estimate = invers.logit(estimate)) %>%
+  summarize(female_surv = cumsum(real_estimate)[1], # intercept
+            male_surv = cumsum(real_estimate)[2])   # intercept + male
+
+
+
+```
+
+
+```{r}
+rm( list = ls( all = TRUE ) )
+cleanup( ask = FALSE )
+```
 
