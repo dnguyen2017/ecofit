@@ -6,72 +6,14 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(readxl)
 ```
 
-```{r pure_known_fate, include= FALSE}
-excel_sheets("weevil_data/LH data records.xlsx")
-pure_lh_raw <- read_excel("weevil_data/LH data records.xlsx",
-           sheet = "all pure data")# %>% 
-  # all excel data converted to excel numeric dates
-  # mutate to change all back to real dates
-pure_lh <- 
-  pure_lh_raw %>%
-  mutate(egg_date = janitor::excel_numeric_to_date(egg.laid),
-         emerge_date = janitor::excel_numeric_to_date(as.numeric(emerged) ),
-         death_date = janitor::excel_numeric_to_date(as.numeric(adult.dies) )) %>% 
-  select(ID,gender, egg_date, emerge_date, death_date) %>%
-  mutate(lifetime = as.numeric(death_date - emerge_date)) 
-
-# create encounter history col for known-fate analysis
-kf_pure <- pure_lh %>%
-  mutate(max_lifetime = max(lifetime, na.rm = TRUE)) %>%
-  rowwise() %>% # rowwise makes var called by mutate row-specific (much handier  than group_by on the row number)
-  # in this mutate, i create a vector of 1s for all days alive and 0s to pad days dead (up to max_lifetime)
-  # then paste together and collapse into a string
-  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), rep(0, length.out = (max_lifetime - lifetime) )), # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
-                                collapse = ","),
-         pct_shell = 0) %>%
-  filter(!is.na(death_date)) %>% # remove rows where death date is missing (these weevils were sacrificed)
-  select(ID, 
-         encounter_hist, 
-         gender, pct_shell) # include 2 covariates
-
-# what's up with NAs
-# i think they are either: never emerged or were sacrificed
-pure_lh_raw %>%
-  filter(is.na(emerged) | sacrifice == 1) %>%
-  select(ID, egg.laid, emerged, adult.dies, sacrifice) %>%
-  nrow()
-  
-```
-
-```{r}
-# make something to export as inp
-kf_pure %>%
-  mutate(ch = str_replace_all(encounter_hist, pattern = ",", replace = ""),
-         comment_id = paste("/*",ID,"*/", sep = ""),
-         freq = 1,
-         sex = case_when(gender == "f" ~ 0,
-                         gender == "m" ~ 1),
-         end_line = ";") %>%
-  # inp format
-  # /* ID */ capture history, freq of observed history, covariates;
-  select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
-  #write.table(file= "weevil_data/kf_pure.csv")
-  write_delim(path = "weevil_data/kf_pure.inp",
-            col_names = FALSE) # by default, write_delim makes a " " delimited txt file
-
-# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
-RMark::convert.inp("weevil_data/kf_pure.inp",
-                   covariates = c("sex", "pct_shell"),
-                   use.comments = TRUE) # uses comments as row names
-```
-
 ### need to compare pure bean weevils to the data from all pure sheet
 
-```{r}
+```{r, include = FALSE}
 #  try to do the same for "pure f" sheet, which (i think?) has life history data for all treatments
 # it does have > 800rows... so maybe it is all of them?
 raw_pure_f <- read_excel("weevil_data/LH data records.xlsx",
@@ -147,6 +89,53 @@ RMark::convert.inp("weevil_data/kf_pure_f.inp",
                    use.comments = TRUE) # uses comments as row names
 ```
 
+### Weevil longevity data
+
+```{r longevity_plot, out.width="50%", fig.show='hold'}
+# life time plot
+lh_data %>%
+  filter(!is.na(death_date),
+         death_date != as.Date("1927-05-17") ,
+         pct_shell != 20) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date)) %>%
+  group_by(pct_shell, gender) %>%
+  mutate(mean_lifetime = mean(lifetime)) %>%
+  #ungroup() %>%
+  ggplot() +
+  geom_jitter(aes(x = pct_shell, y = lifetime, col = gender, shape = gender), size = 2, alpha = 0.5) +
+  geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 4, size = 2.5, stroke = 3) +
+  ylim(0, 20) +
+  labs(title = "Weevil lifetime",
+       subtitle = "X's are means",
+       x = "Percent peanut shell in bean",
+       y = "lifetime (days)") +
+  theme(legend.position = "n")
+
+# daily survival plot
+lh_data %>%
+  filter(!is.na(death_date),
+         death_date != as.Date("1927-05-17") ,
+         pct_shell != 20) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date),
+         daily_death = 1/lifetime,
+         daily_surv = 1 - daily_death) %>%
+  group_by(pct_shell, gender) %>%
+  mutate(mean_surv = mean(daily_surv)) %>%
+  # group_by(pct_shell, gender) %>%
+  # mutate(mean_lifetime = mean(lifetime)) %>%
+  # ungroup() %>%
+  ggplot() +
+  geom_jitter(aes(x = pct_shell, y = daily_surv, col = gender, shape = gender), size = 2, alpha = 0.5) +
+  geom_point(aes(x = pct_shell, y = mean_surv, col = gender), shape = 4, size = 2.5, stroke = 3) +
+    ylim(0, 1) +
+  labs(title = "Weevil daily survival probability",
+       subtitle = "Survival probality is assumed to be constant (exponential distributed lifetimes).",
+       x = "Percent peanut shell in bean",
+       y = "Daily survival probability")
+  #geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
+```
+
+### Kaplan-Meier survival analysis
 
 ```{r run_known_fate, include = FALSE}
 library(RMark)
@@ -175,15 +164,19 @@ weevil.results <- weevil.Mark()
 ```
 
 ```{r surv_model_comparison}
-weevil.results                                                          
+weevil.results$model.table %>%
+  select(model, AICc, DeltaAICc, weight, Deviance, npar) %>%
+  rename("Model" = model, "Weight" = weight, "parameters" = npar) %>%
+  remove_rownames() %>%
+  #tibble()
+  knitr::kable(digits = 2)
 # lapply( weevil.results[ 1:4 ], 
 #         function( .mark ) .mark$results$beta )    # Parameter estimates
 ```
 
-### problem with survival estimates
-males should have a higher survival probability than females. Yet the model is predicting the opposite. Females are coded as 0 and males are 1.
+The top two models include sex and percent peanut shell as covariates.
 
-```{r surv_estimates}
+```{r surv_estimates, warning = FALSE}
 # make data for predictions
 pred_data <- expand_grid(sex = c(0, 1),
                     pct_shell = seq(0, 15, by = 5))
@@ -209,9 +202,8 @@ pred_list <-
   list(intercept.predict$estimates,
 shell.predict$estimates,
 sex.predict$estimates,
-sexshell.predict$estimates,
-averaged.predict$estimates)
-names(pred_list) <- c("intercept", "shell", "sex", "sex + shell", "averaged")
+sexshell.predict$estimates )#, averaged.predict$estimates)
+names(pred_list) <- c("survival ~ intercept", "survival ~ shell", "survival ~ sex", "survival ~ sex + shell")#, "averaged")
 
 pred_plot <- do.call(rbind, lapply (names(pred_list), function(x) data.frame(pred_list[[x]], model = x)) ) %>%
   select(model, sex, pct_shell, estimate, lcl, ucl)
@@ -221,10 +213,15 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.ch
   geom_line(size = 2) +
   ylim(0.75,1) +
   geom_ribbon(aes(x = pct_shell, ymin = lcl, ymax = ucl, fill = model), alpha = 0.5) +
-  facet_wrap(~model)
+  facet_wrap(~model) +
+  labs(title = "Known-fate survival estimates",
+       subtitle = "Females are solid lines, males are dashed",
+       x = "Percent peanut shell in bean",
+       y = "Estimated daily survival (95 % CI)") +
+  theme(legend.position = "n")
 ```
 
-```{r}
+```{r, eval = FALSE}
 # time model
 time.predict <- covariate.predictions( weevil.results$S.time, # choose model
                                            indices = 1, data = expand_grid(time = seq(0, 15, by = 1),
@@ -233,39 +230,68 @@ time.predict <- covariate.predictions( weevil.results$S.time, # choose model
 time.predict$estimates
 ```
 
-
-```{r lifetime_plot}
-lh_data %>%
-  filter(!is.na(death_date),
-         death_date != as.Date("1927-05-17") ) %>%
-  mutate(lifetime = as.numeric(death_date - emerge_date)) %>%
-  group_by(pct_shell, gender) %>%
-  mutate(mean_lifetime = mean(lifetime)) %>%
-  #ungroup() %>%
-  ggplot() +
-  geom_jitter(aes(x = pct_shell, y = lifetime, col = gender)) +
-  geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
-  # geom_jitter(aes(x = gender, y = lifetime)) +
-  # geom_point(aes(x = gender, y = mean_lifetime), col = "red", size = 2) +
-  # facet_wrap(~pct_shell)
-
-lh_data %>%
-  filter(!is.na(death_date),
-         death_date != as.Date("1927-05-17") ) %>%
-  mutate(lifetime = as.numeric(death_date - emerge_date),
-         daily_death = 1/lifetime) %>%
-  # group_by(pct_shell, gender) %>%
-  # mutate(mean_lifetime = mean(lifetime)) %>%
-  # ungroup() %>%
-  ggplot() +
-  geom_jitter(aes(x = pct_shell, y = daily_death, col = gender)) 
-  #geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
-```
-
-
 ```{r}
 # clean up temp files created by MARK
 rm(list = ls())
 RMark::cleanup( ask = FALSE )
 ```
 
+
+```{r pure_known_fate, include= FALSE, eval = FALSE}
+excel_sheets("weevil_data/LH data records.xlsx")
+pure_lh_raw <- read_excel("weevil_data/LH data records.xlsx",
+           sheet = "all pure data")# %>% 
+  # all excel data converted to excel numeric dates
+  # mutate to change all back to real dates
+pure_lh <- 
+  pure_lh_raw %>%
+  mutate(egg_date = janitor::excel_numeric_to_date(egg.laid),
+         emerge_date = janitor::excel_numeric_to_date(as.numeric(emerged) ),
+         death_date = janitor::excel_numeric_to_date(as.numeric(adult.dies) )) %>% 
+  select(ID,gender, egg_date, emerge_date, death_date) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date)) 
+
+# create encounter history col for known-fate analysis
+kf_pure <- pure_lh %>%
+  mutate(max_lifetime = max(lifetime, na.rm = TRUE)) %>%
+  rowwise() %>% # rowwise makes var called by mutate row-specific (much handier  than group_by on the row number)
+  # in this mutate, i create a vector of 1s for all days alive and 0s to pad days dead (up to max_lifetime)
+  # then paste together and collapse into a string
+  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), rep(0, length.out = (max_lifetime - lifetime) )), # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
+                                collapse = ","),
+         pct_shell = 0) %>%
+  filter(!is.na(death_date)) %>% # remove rows where death date is missing (these weevils were sacrificed)
+  select(ID, 
+         encounter_hist, 
+         gender, pct_shell) # include 2 covariates
+
+# what's up with NAs
+# i think they are either: never emerged or were sacrificed
+pure_lh_raw %>%
+  filter(is.na(emerged) | sacrifice == 1) %>%
+  select(ID, egg.laid, emerged, adult.dies, sacrifice) %>%
+  nrow()
+  
+```
+
+```{r all_pure_to_INP, eval = FALSE}
+# make something to export as inp
+kf_pure %>%
+  mutate(ch = str_replace_all(encounter_hist, pattern = ",", replace = ""),
+         comment_id = paste("/*",ID,"*/", sep = ""),
+         freq = 1,
+         sex = case_when(gender == "f" ~ 0,
+                         gender == "m" ~ 1),
+         end_line = ";") %>%
+  # inp format
+  # /* ID */ capture history, freq of observed history, covariates;
+  select(comment_id, ch, freq, sex, pct_shell, end_line) %>%
+  #write.table(file= "weevil_data/kf_pure.csv")
+  write_delim(path = "weevil_data/kf_pure.inp",
+            col_names = FALSE) # by default, write_delim makes a " " delimited txt file
+
+# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
+RMark::convert.inp("weevil_data/kf_pure.inp",
+                   covariates = c("sex", "pct_shell"),
+                   use.comments = TRUE) # uses comments as row names
+```
