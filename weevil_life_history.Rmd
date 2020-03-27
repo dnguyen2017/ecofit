@@ -114,12 +114,16 @@ lh_data %>%
          max_lifetime = max(lifetime, na.rm = TRUE),
          dead_time = (max_lifetime - lifetime)) %>%
   rowwise() %>% 
-  # in this mutate, i create a vector of 1s for all days alive and 0s to pad days dead (up to max_lifetime)
+  # Make LDLDLD format date (http://www.phidot.org/software/mark/docs/book/pdf/chap16.pdf)
+  # c(1,0)s for all days alive, 
+  # c(1,1) for death, and 
+  # c(0,0)s to censored days post-death (up to max_lifetime)
   # then paste together and collapse into a string
   # https://stackoverflow.com/questions/2098368/concatenate-a-vector-of-strings-character
-  mutate(encounter_hist = paste(c(rep(1, length.out = lifetime), # days alive
-                                  rep(0, length.out = (max_lifetime - lifetime + 1) )), # days dead (need to add an extra zero so there are no encounter histories of just 1s) 
-                                collapse = ",")) %>%
+  mutate(encounter_hist = paste(c(rep(c(1,0), times = lifetime), # days alive
+                                c(1,1), # death day
+                                rep(c(0,0), length.out = (max_lifetime - lifetime)))), # days censored
+                                collapse = ",") %>%
   select(ID, 
          encounter_hist, 
          gender, pct_shell) %>%
