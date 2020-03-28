@@ -82,7 +82,8 @@ lh_data %>%
     write_delim(path = "weevil_data/kf_pure_f.inp",
             col_names = FALSE) # by default, write_delim makes a " " delimited txt file
 
-# ughh, turns out that the "RMark" style is exactly what I already had! no point in doing all the work to make an INP format file!
+# turns out that the "RMark" style is exactly what I already had! 
+# make an INP anyway so that I could run analysis again in MARK to double check
 RMark::convert.inp("weevil_data/kf_pure_f.inp",
                    covariates = c("sex", "pct_shell"),
                    use.comments = TRUE) # uses comments as row names
@@ -91,15 +92,20 @@ RMark::convert.inp("weevil_data/kf_pure_f.inp",
 ### Weevil longevity data
 
 ```{r longevity_plot, out.width="50%", fig.show='hold'}
-# life time plot
-lh_data %>%
+surv_data <-
+  lh_data %>%
   filter(!is.na(death_date),
          death_date != as.Date("1927-05-17") ,
          pct_shell != 20) %>%
-  mutate(lifetime = as.numeric(death_date - emerge_date)) %>%
+  mutate(lifetime = as.numeric(death_date - emerge_date), 
+         daily_death = 1/lifetime,
+         daily_surv = 1 - daily_death) %>%
   group_by(pct_shell, gender) %>%
-  mutate(mean_lifetime = mean(lifetime)) %>%
-  #ungroup() %>%
+  mutate(mean_lifetime = mean(lifetime),
+         mean_surv = mean(daily_surv))
+
+# life time plot
+surv_data %>%
   ggplot() +
   geom_jitter(aes(x = pct_shell, y = lifetime, col = gender, shape = gender), size = 2, alpha = 0.5) +
   geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 4, size = 2.5, stroke = 3) +
@@ -111,18 +117,7 @@ lh_data %>%
   theme(legend.position = "n")
 
 # daily survival plot
-lh_data %>%
-  filter(!is.na(death_date),
-         death_date != as.Date("1927-05-17") ,
-         pct_shell != 20) %>%
-  mutate(lifetime = as.numeric(death_date - emerge_date),
-         daily_death = 1/lifetime,
-         daily_surv = 1 - daily_death) %>%
-  group_by(pct_shell, gender) %>%
-  mutate(mean_surv = mean(daily_surv)) %>%
-  # group_by(pct_shell, gender) %>%
-  # mutate(mean_lifetime = mean(lifetime)) %>%
-  # ungroup() %>%
+surv_data %>%  
   ggplot() +
   geom_jitter(aes(x = pct_shell, y = daily_surv, col = gender, shape = gender), size = 2, alpha = 0.5) +
   geom_point(aes(x = pct_shell, y = mean_surv, col = gender), shape = 4, size = 2.5, stroke = 3) +
@@ -135,6 +130,8 @@ lh_data %>%
 ```
 
 ### Kaplan-Meier survival analysis
+
+All models assume constant survival probability. When I tried to estimate time specific survival probabilities but I got S(t) = 1 for all time points. Not sure what the issue is there.
 
 ```{r run_known_fate, include = FALSE}
 library(RMark)
@@ -172,8 +169,6 @@ weevil.results$model.table %>%
 # lapply( weevil.results[ 1:4 ], 
 #         function( .mark ) .mark$results$beta )    # Parameter estimates
 ```
-
-The top two models include sex and percent peanut shell as covariates.
 
 ```{r surv_estimates, warning = FALSE}
 # make data for predictions
@@ -220,8 +215,14 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.ch
   theme(legend.position = "n")
 ```
 
+> Should make two plots: 1. predicted lifespan + obs. data; 2. survival prob + obss .data. much more concise.
+
 ### Thoughts
-It is clear that the sex of adult weevils has an effect on survival and that resource quality doesn't much of an effect on survival. We should expect that females will have lower survival than males since they allocate more resources to reproduction. However, I think it is interesting that resource quality has such a weak effect on survival since weevils don't require food after emerging as adults so adult weevils rely almost entirely on what they ingested as larvae.
+The estimates seem reasonable. The estimated survival probabilities are in line with the mean lifetimes shown in the first figure.
+
+It is clear that the sex of adult weevils has an effect on survival and that resource quality doesn't much of an effect on survival. 
+We should expect that females will have lower survival than males since they allocate more resources to reproduction. 
+However, I think it is interesting that resource quality has such a weak effect on survival considering their biology; weevils don't require food after emerging as adults so adult weevils rely almost entirely on what they ingested as larvae.
 
 The next step is to investigate:
 
@@ -231,7 +232,7 @@ The next step is to investigate:
 
 as functions of food quality. 
 
-Using these vital rate estimates I can construct population projection matrices.
+I'll make population projection matrices with these estimates and compare them with Markus'.
 
 ```{r, eval = FALSE}
 # time model
