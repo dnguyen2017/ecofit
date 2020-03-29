@@ -115,7 +115,7 @@ surv_data %>%
               width = 0.75, position = position_dodge(0.25), outlier.shape = NA) +
   ylim(0, 20) +
   labs(title = "Weevil lifetime",
-       subtitle = "X's are means",
+       #subtitle = "X's are means",
        x = "Percent peanut shell in bean",
        y = "lifetime (days)") +
   theme(legend.position = "n")
@@ -127,7 +127,7 @@ surv_data %>%
   # geom_point(aes(x = pct_shell, y = mean_surv, col = gender), shape = 4, size = 2.5, stroke = 3) +
   #   ylim(0, 1) +
   labs(title = "Weevil daily survival probability",
-       subtitle = "Survival probality is assumed to be constant (exponential distributed lifetimes).",
+       subtitle = "Survival probabilities calculated assuming exponentially distributed lifetimes.",
        x = "Percent peanut shell in bean",
        y = "Daily survival probability") +
   geom_boxplot(data = surv_data,
@@ -167,8 +167,6 @@ weevil.results <- weevil.Mark()
 
 ```
 
-Not sure how "real" The effect of percent peanut shell on survival is. I think it may be driven by just a few influential observations that were unusually low for both males and females (see plots of observed data). It's not clear to me that these low observations are attributable to food quality. This is reflected in the relative AIC weights for the models; the S ~ sex model has 0.71 support from the data and the S ~ sex + % shell model has 0.29 support from the data.
-
 <!-- should add plot of regression coefficients for each model -->
 
 ```{r surv_model_comparison}
@@ -181,6 +179,38 @@ weevil.results$model.table %>%
 # lapply( weevil.results[ 1:4 ], 
 #         function( .mark ) .mark$results$beta )    # Parameter estimates
 ```
+
+
+```{r param_est_plots}
+beta_sexshell <- 
+  weevil.results$S.sexshell$results$beta %>%
+  rownames_to_column("coefficient") %>%
+  as_tibble(rownames = NA) %>%
+  mutate(model = "survival ~ sex + pct_shell")
+
+beta_sex <-
+  weevil.results$S.sex$results$beta %>%
+  rownames_to_column("coefficient") %>%
+  as_tibble(rownames = NA) %>%
+  mutate(model = "survival ~ sex")
+
+rbind(beta_sexshell, beta_sex) %>%
+  ggplot() +
+  geom_point(aes(x = coefficient, y = estimate, group = interaction(coefficient, model)),
+             size = 2) +
+  geom_errorbar(aes(x = coefficient, ymin = lcl, ymax = ucl, group = interaction(coefficient, model)),
+                width = 0, size = 1) +
+  geom_hline(aes(yintercept = 0), linetype = 2) +
+  facet_wrap(~model, scales = "free", nrow = 2) +
+  coord_flip() +
+  labs(x = element_blank(),
+       y = "parameter estimate (logit scale)",
+       title = "model parameter estimates") +
+  theme(legend.position = "n")
+
+```
+
+The top two models are Survival ~ Sex and Survival ~ Sex + food quality. But, I don't think there is a real effect of food quality on adult survival. After accounting for adult sex, food quality has almost zero influence on adult survival. Probably driven solely by a few influential points that popped up for the lower food quality treatments (see plot of observed daily survival).
 
 ```{r surv_estimates, warning = FALSE}
 # make data for predictions
@@ -232,7 +262,7 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, group = sex, linetype = facto
 
 Same plot but with the observed data overlaid onto estimates (outliers removed). Useful or too busy?
 
-```{r}
+```{r warning = FALSE}
 # per above comment, trying to add observed data to predicted survival
 ggplot() +
   geom_line(data    = pred_plot, 
@@ -260,11 +290,11 @@ ggplot() +
   theme(legend.position = "n")
 ```
 
-
-### Thoughts
 The estimates seem reasonable. The estimated survival probabilities are in line with the mean lifetimes shown in the first figure. 
 
-It is clear that the sex of adult weevils has an effect on survival and that resource quality doesn't much of an effect on survival. 
+### Thoughts
+
+It is clear that the sex of adult weevils has an effect on survival and that resource quality probably doesn't. 
 We should expect that females will have lower survival than males since they allocate more resources to reproduction. 
 However, I think it is interesting that resource quality has such a weak effect on survival considering their biology; weevils don't require food after emerging as adults so adult weevils rely almost entirely on what they ingested as larvae. 
 
@@ -355,3 +385,4 @@ RMark::convert.inp("weevil_data/kf_pure.inp",
                    covariates = c("sex", "pct_shell"),
                    use.comments = TRUE) # uses comments as row names
 ```
+
