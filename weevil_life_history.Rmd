@@ -1,7 +1,7 @@
 ---
 title: "weevil life history data"
 author: "David Nguyen"
-date: "March 26, 2020"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
 output: html_document
 ---
 
@@ -95,7 +95,7 @@ RMark::convert.inp("weevil_data/kf_pure_f.inp",
 surv_data <-
   lh_data %>%
   filter(!is.na(death_date),
-         death_date != as.Date("1927-05-17") ,
+         death_date != as.Date("1927-05-17") , # weird stuff in this row of data besides date typo
          pct_shell != 20) %>%
   mutate(lifetime = as.numeric(death_date - emerge_date), 
          daily_death = 1/lifetime,
@@ -108,7 +108,11 @@ surv_data <-
 surv_data %>%
   ggplot() +
   geom_jitter(aes(x = pct_shell, y = lifetime, col = gender, shape = gender), size = 2, alpha = 0.5) +
-  geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 4, size = 2.5, stroke = 3) +
+  #geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 4, size = 2.5, stroke = 3) +
+  geom_boxplot(data = surv_data,
+              mapping = aes(x = pct_shell, y = mean_lifetime, 
+                            group = interaction(pct_shell, gender), fill = gender ), # use interaction to group by multiple vars
+              width = 0.75, position = position_dodge(0.25), outlier.shape = NA) +
   ylim(0, 20) +
   labs(title = "Weevil lifetime",
        subtitle = "X's are means",
@@ -120,12 +124,16 @@ surv_data %>%
 surv_data %>%  
   ggplot() +
   geom_jitter(aes(x = pct_shell, y = daily_surv, col = gender, shape = gender), size = 2, alpha = 0.5) +
-  geom_point(aes(x = pct_shell, y = mean_surv, col = gender), shape = 4, size = 2.5, stroke = 3) +
-    ylim(0, 1) +
+  # geom_point(aes(x = pct_shell, y = mean_surv, col = gender), shape = 4, size = 2.5, stroke = 3) +
+  #   ylim(0, 1) +
   labs(title = "Weevil daily survival probability",
        subtitle = "Survival probality is assumed to be constant (exponential distributed lifetimes).",
        x = "Percent peanut shell in bean",
-       y = "Daily survival probability")
+       y = "Daily survival probability") +
+  geom_boxplot(data = surv_data,
+              mapping = aes(x = pct_shell, y = daily_surv, 
+                            group = interaction(pct_shell, gender), fill = gender ), # use interaction to group by multiple vars
+              width = 0.75, position = position_dodge(0.25), outlier.shape = NA)
   #geom_point(aes(x = pct_shell, y = mean_lifetime, col = gender), shape = 3, size = 2.5, stroke = 2)
 ```
 
@@ -158,6 +166,10 @@ weevil.Mark <- function () {
 weevil.results <- weevil.Mark()
 
 ```
+
+Not sure how "real" The effect of percent peanut shell on survival is. I think it may be driven by just a few influential observations that were unusually low for both males and females (see plots of observed data). It's not clear to me that these low observations are attributable to food quality. This is reflected in the relative AIC weights for the models; the S ~ sex model has 0.71 support from the data and the S ~ sex + % shell model has 0.29 support from the data.
+
+<!-- should add plot of regression coefficients for each model -->
 
 ```{r surv_model_comparison}
 weevil.results$model.table %>%
@@ -200,13 +212,14 @@ sexshell.predict$estimates )#, averaged.predict$estimates)
 names(pred_list) <- c("survival ~ intercept", "survival ~ shell", "survival ~ sex", "survival ~ sex + shell")#, "averaged")
 
 pred_plot <- do.call(rbind, lapply (names(pred_list), function(x) data.frame(pred_list[[x]], model = x)) ) %>%
-  select(model, sex, pct_shell, estimate, lcl, ucl)
+  select(model, sex, pct_shell, estimate, lcl, ucl) %>%
+  as_tibble()
 
 # Create plot of model predictions, with 95% CI
-ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.character(sex) )) +
-  geom_line(size = 2) +
+ggplot(pred_plot, aes(x = pct_shell, y = estimate, group = sex, linetype = factor(sex))) +#, col = sex, linetype = as.character(sex) )) +
+  geom_line(size = 1.5) +
   ylim(0.75,1) +
-  geom_ribbon(aes(x = pct_shell, ymin = lcl, ymax = ucl, fill = model), alpha = 0.5) +
+  geom_ribbon(aes(x = pct_shell, ymin = lcl, ymax = ucl, group = sex), alpha = 0.5) +
   facet_wrap(~model) +
   labs(title = "Known-fate survival estimates",
        subtitle = "Females are solid lines, males are dashed",
@@ -215,14 +228,48 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, col = model, linetype = as.ch
   theme(legend.position = "n")
 ```
 
-> Should make two plots: 1. predicted lifespan + obs. data; 2. survival prob + obss .data. much more concise.
+<!-- Should make two plots: 1. predicted lifespan + obs. data; 2. survival prob + obss .data. much more concise. -->
+
+Same plot but with the observed data overlaid onto estimates (outliers removed). Useful or too busy?
+
+```{r}
+# per above comment, trying to add observed data to predicted survival
+ggplot() +
+  geom_line(data    = pred_plot, 
+            mapping = aes(x = pct_shell, y = estimate, group = sex, linetype = factor(sex) ),
+            size = 2) +
+  geom_ribbon(data    = pred_plot,
+              mapping = aes(x = pct_shell, ymin = lcl, ymax = ucl, group = sex), alpha = 0.5) +
+  # geom_jitter(data = surv_data,
+  #             mapping = aes(x = pct_shell, y = daily_surv, shape = gender), #, col = gender, shape = gender),
+  #             size = 2, alpha = 0.5) +
+  geom_boxplot(data = surv_data,
+              mapping = aes(x = pct_shell, y = daily_surv, 
+                            group = interaction(pct_shell, gender), fill = gender ), # use interaction to group by multiple vars
+              width = 0.75, position = position_dodge(0.25), outlier.shape = NA) +
+  ylim(0.75,1) +
+  # geom_point(data = surv_data,
+  #            mapping = aes(x = pct_shell, y = mean_surv, col = gender),
+  #            shape = 4, size = 2.5, stroke = 3) +
+  #facet_grid(gender~model) +
+  facet_wrap(~model) +
+  labs(title = "Known-fate survival estimates",
+       subtitle = "Females are solid lines or red, males are dashed or blue",
+       x = "Percent peanut shell in bean",
+       y = "Estimated daily survival (95 % CI)") +
+  theme(legend.position = "n")
+```
+
 
 ### Thoughts
-The estimates seem reasonable. The estimated survival probabilities are in line with the mean lifetimes shown in the first figure.
+The estimates seem reasonable. The estimated survival probabilities are in line with the mean lifetimes shown in the first figure. 
 
 It is clear that the sex of adult weevils has an effect on survival and that resource quality doesn't much of an effect on survival. 
 We should expect that females will have lower survival than males since they allocate more resources to reproduction. 
-However, I think it is interesting that resource quality has such a weak effect on survival considering their biology; weevils don't require food after emerging as adults so adult weevils rely almost entirely on what they ingested as larvae.
+However, I think it is interesting that resource quality has such a weak effect on survival considering their biology; weevils don't require food after emerging as adults so adult weevils rely almost entirely on what they ingested as larvae. 
+
+Hmm, Markus also recorded the start and end weight of each bean pellet, so we know how much each larvae consumed. 
+Do larvae in poor quality beans eat more to compensate for the low nutrition? Not super important, but would be interesting to check out.
 
 The next step is to investigate:
 
@@ -232,7 +279,7 @@ The next step is to investigate:
 
 as functions of food quality. 
 
-I'll make population projection matrices with these estimates and compare them with Markus'.
+Once I've done that I'll make population projection matrices with these estimates and compare them with Markus'.
 
 ```{r, eval = FALSE}
 # time model
