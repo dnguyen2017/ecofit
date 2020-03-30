@@ -176,32 +176,74 @@ weevil.results$model.table %>%
   remove_rownames() %>%
   #tibble()
   knitr::kable(digits = 2)
-# lapply( weevil.results[ 1:4 ], 
-#         function( .mark ) .mark$results$beta )    # Parameter estimates
+```
+
+
+```{r get_betas, include = FALSE}
+# lapply( weevil.results[ 1:4 ],
+#         function( .mark )                        # I think .mark grabs weevil.results[i]
+#           .mark$results$beta %>%                 # Parameter estimates
+#           rownames_to_column("coefficient") %>%  # make col with name of coefficient
+#           as_tibble(rownames = NA) %>%           
+#           mutate(model = .mark[[4]])) %>%        # weevil.results[[i]][4] gets name of model
+#   bind_rows() 
+
+# second try using a for loop
+# beta_list <- vector("list", length = length(model_names))
+# 
+# for (i in seq_along(model_names)) {
+#   model <- model_names[i] # this bit is not working how i want it to
+#   beta_list[[i]] <- weevil.results$model$results$beta %>%
+#   rownames_to_column("coefficient") %>%
+#   as_tibble(rownames = NA) %>%
+#   mutate(model = model_names[i])
+# }
+
+# get names of models used by rMark
+rmark_names <- names(weevil.results) %>% head(-1) 
+# create named vector of model names I want to use
+model_names <- c("S.dot" = "survival ~ intercept", "S.shell" =  "survival ~ shell", 
+                 "S.sex" = "survival ~ sex", "S.sexshell" = "survival ~ sex + shell")
+
+# init a list to store each df of beta
+beta_list <- vector("list", length = length(model_names))
+# extract df of betas for each model and name it
+for (i in seq_along(rmark_names)){
+  beta_list[[i]] <- 
+    weevil.results[[rmark_names[i]]]$results$beta %>% 
+    rownames_to_column("coefficient") %>%  # make col with name of coefficient
+          as_tibble(rownames = NA) %>%           
+    mutate(model = model_names[rmark_names[i]])
+
+}
+
+# reate df of betas
+coef_df <- beta_list %>% bind_rows()
 ```
 
 
 ```{r param_est_plots}
-beta_sexshell <- 
-  weevil.results$S.sexshell$results$beta %>%
-  rownames_to_column("coefficient") %>%
-  as_tibble(rownames = NA) %>%
-  mutate(model = "survival ~ sex + pct_shell")
-
-beta_sex <-
-  weevil.results$S.sex$results$beta %>%
-  rownames_to_column("coefficient") %>%
-  as_tibble(rownames = NA) %>%
-  mutate(model = "survival ~ sex")
-
-rbind(beta_sexshell, beta_sex) %>%
+# beta_sexshell <- 
+#   weevil.results$S.sexshell$results$beta %>%
+#   rownames_to_column("coefficient") %>%
+#   as_tibble(rownames = NA) %>%
+#   mutate(model = "survival ~ sex + pct_shell")
+# 
+# beta_sex <-
+#   weevil.results$S.sex$results$beta %>%
+#   rownames_to_column("coefficient") %>%
+#   as_tibble(rownames = NA) %>%
+#   mutate(model = "survival ~ sex")
+# 
+# rbind(beta_sexshell, beta_sex) %>%
+coef_df %>%
   ggplot() +
   geom_point(aes(x = coefficient, y = estimate, group = interaction(coefficient, model)),
              size = 2) +
   geom_errorbar(aes(x = coefficient, ymin = lcl, ymax = ucl, group = interaction(coefficient, model)),
                 width = 0, size = 1) +
   geom_hline(aes(yintercept = 0), linetype = 2) +
-  facet_wrap(~model, scales = "free", nrow = 2) +
+  facet_wrap(~model, scales = "free", nrow = 4) +
   coord_flip() +
   labs(x = element_blank(),
        y = "parameter estimate (logit scale)",
