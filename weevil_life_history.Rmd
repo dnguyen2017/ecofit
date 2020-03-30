@@ -152,7 +152,8 @@ weevil.Mark <- function () {
   S.dot <- list( formula = ~ 1, link = "logit" )                  # S(.) constant survival
   S.shell <- list( formula = ~ pct_shell, link = "logit" )        # S(percent peanut shell)
   S.sex <- list(formula = ~ sex, link = "logit")                  # S(sex of weevil)
-  S.sexshell <- list(formula = ~ sex + pct_shell, link = "logit")
+  S.sexshell <- list(formula = ~ sex + pct_shell, link = "logit") # sex-specific intercepts and same slope
+  S.sexshellfull <- list(formula = ~ sex * pct_shell, link = "logit") # sex specific intercepts and slopes
   #S.time <- list(formula = ~ time, link = "logit")
   
   weevil.models <- create.model.list( "Known" )
@@ -203,7 +204,8 @@ weevil.results$model.table %>%
 rmark_names <- names(weevil.results) %>% head(-1) 
 # create named vector of model names I want to use
 model_names <- c("S.dot" = "survival ~ intercept", "S.shell" =  "survival ~ shell", 
-                 "S.sex" = "survival ~ sex", "S.sexshell" = "survival ~ sex + shell")
+                 "S.sex" = "survival ~ sex", "S.sexshell" = "survival ~ sex + shell",
+                 "S.sexshellfull" = "survival ~ sex * shell")
 
 # init a list to store each df of beta
 beta_list <- vector("list", length = length(model_names))
@@ -246,7 +248,7 @@ beta_df %>%
   geom_errorbar(aes(x = coefficient, ymin = lcl, ymax = ucl, group = interaction(coefficient, model)),
                 width = 0, size = 1) +
   geom_hline(aes(yintercept = 0), linetype = 2) +
-  facet_wrap(~model, scales = "free", nrow = 4) +
+  facet_wrap(~model, scales = "free", nrow = length(model_names) ) +
   coord_flip() +
   labs(x = element_blank(),
        y = "parameter estimate (logit scale)",
