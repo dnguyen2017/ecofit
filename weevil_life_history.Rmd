@@ -214,11 +214,14 @@ for (i in seq_along(rmark_names)){
     rownames_to_column("coefficient") %>%  # make col with name of coefficient
           as_tibble(rownames = NA) %>%           
     mutate(model = model_names[rmark_names[i]])
-
 }
 
 # reate df of betas
-coef_df <- beta_list %>% bind_rows()
+beta_df <-
+  beta_list %>% bind_rows() %>%
+  mutate(coefficient = case_when(coefficient == "S:(Intercept)" ~ "int.",
+                                 coefficient != "S:(Intercept)" ~ str_remove(coefficient, "S:")))
+
 ```
 
 
@@ -236,7 +239,7 @@ coef_df <- beta_list %>% bind_rows()
 #   mutate(model = "survival ~ sex")
 # 
 # rbind(beta_sexshell, beta_sex) %>%
-coef_df %>%
+beta_df %>%
   ggplot() +
   geom_point(aes(x = coefficient, y = estimate, group = interaction(coefficient, model)),
              size = 2) +
