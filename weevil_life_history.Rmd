@@ -154,7 +154,8 @@ weevil.Mark <- function () {
   S.sex <- list(formula = ~ sex, link = "logit")                  # S(sex of weevil)
   S.sexshell <- list(formula = ~ sex + pct_shell, link = "logit") # sex-specific intercepts and same slope
   S.sexshellfull <- list(formula = ~ sex * pct_shell, link = "logit") # sex specific intercepts and slopes
-  #S.time <- list(formula = ~ time, link = "logit")
+  S.time <- list(formula = ~ time, link = "logit")
+  # S.timeI <- list(formula = ~ I(time), link = "logit")            # try to make time
   
   weevil.models <- create.model.list( "Known" )
   
@@ -201,11 +202,13 @@ weevil.results$model.table %>%
 # }
 
 # get names of models used by rMark
-rmark_names <- names(weevil.results) %>% head(-1) 
+rmark_names <- names(weevil.results) %>% head(5) 
 # create named vector of model names I want to use
-model_names <- c("S.dot" = "survival ~ intercept", "S.shell" =  "survival ~ shell", 
-                 "S.sex" = "survival ~ sex", "S.sexshell" = "survival ~ sex + shell",
-                 "S.sexshellfull" = "survival ~ sex * shell")
+model_names <- c("S.dot" = "survival ~ intercept"
+                 ,"S.sex" = "survival ~ sex"
+                 ,"S.sexshell" = "survival ~ sex + shell"
+                 ,"S.sexshellfull" = "survival ~ sex * shell"
+                 ,"S.shell" =  "survival ~ shell")
 
 # init a list to store each df of beta
 beta_list <- vector("list", length = length(model_names))
@@ -248,10 +251,10 @@ beta_df %>%
   geom_errorbar(aes(x = coefficient, ymin = lcl, ymax = ucl, group = interaction(coefficient, model)),
                 width = 0, size = 1) +
   geom_hline(aes(yintercept = 0), linetype = 2) +
-  facet_wrap(~model, scales = "free", nrow = length(model_names) ) +
+  facet_wrap(~model, scales = "free_y", nrow = length(model_names) ) +
   coord_flip() +
   labs(x = element_blank(),
-       y = "parameter estimate (logit scale)",
+       y = "logit scale parameter estimates (95 % CI)",
        title = "model parameter estimates") +
   theme(legend.position = "n")
 
@@ -282,10 +285,10 @@ averaged.predict <- covariate.predictions(weevil.results, # averaged model estim
                                         indices = 1, data = pred_data)
 # combine predictions into a single df
 pred_list <- 
-  list(intercept.predict$estimates,
-shell.predict$estimates,
-sex.predict$estimates,
-sexshell.predict$estimates )#, averaged.predict$estimates)
+  list(intercept.predict$estimates
+,shell.predict$estimates
+,sex.predict$estimates
+,sexshell.predict$estimates )#, averaged.predict$estimates)
 names(pred_list) <- c("survival ~ intercept", "survival ~ shell", "survival ~ sex", "survival ~ sex + shell")#, "averaged")
 
 pred_plot <- do.call(rbind, lapply (names(pred_list), function(x) data.frame(pred_list[[x]], model = x)) ) %>%
@@ -336,6 +339,14 @@ ggplot() +
        y = "Estimated daily survival (95 % CI)") +
   theme(legend.position = "n")
 ```
+
+```{r plot_stime, eval = FALSE}
+weevil.results$S.time$results$real %>% rowid_to_column("day") %>%
+  ggplot() +
+  geom_line(aes(x = day, y = estimate)) +
+  geom_ribbon(aes(x = day, ymin = lcl, ymax = ucl), alpha = 0.5)
+```
+
 
 The estimates seem reasonable. The estimated survival probabilities are in line with the mean lifetimes shown in the first figure. 
 
