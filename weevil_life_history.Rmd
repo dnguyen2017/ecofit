@@ -422,10 +422,65 @@ st_pred <-
               size = 1.5) +
   ylim(0, 1) +
   facet_wrap(~model)
+  
+```
 
-# st_pred %>%
-#   ggplot(aes(x = day, y = st)) +
-#   geom_line()
+```{r}
+
+# prop. still alive stratified by pect_shell and gender
+st_obs_sexshell <-
+surv_data %>%
+  group_by(pct_shell, gender) %>%
+  mutate(n0 = length(unique(ID))   # number of individuals in each pct_shell * sex category
+         ) %>%
+  group_by(pct_shell, gender, lifetime) %>%
+  mutate(still_alive = length(unique(ID)) / n0)
+  # select(pct_shell, gender, n0) %>%
+  # summarize(n0 = mean(n0))
+
+# unstratified prop. still alive
+# something is wrong here
+st_obs <-
+  surv_data %>%
+  ungroup() %>%
+  mutate(n0 = length(unique(ID))) %>%
+  group_by(lifetime) %>%
+  mutate(still_alive = length(unique(ID)) / n0) %>%
+  arrange(lifetime) %>% select(lifetime, still_alive)
+  
+sum(surv_data$lifetime >= 1)
+
+surv_data %>%
+  ungroup() %>%
+  mutate(day = map(lifetime, function(x) 1:20)) %>%
+  unnest(c(day)) %>%
+  mutate(still_alive = map(lifetime, function(x) sum(lifetime >= x))) %>%
+  unnest(still_alive)
+  
+
+```
+
+```{r compare_obs_predicted_st}
+# calculate prop still alive at ages 1:20 days
+still_alive <- numeric(length = 20) 
+alive_at_start <- sum(surv_data$lifetime >= 1)
+for(i in 1:20) {
+  still_alive[i] <- sum(surv_data$lifetime >= i)/ alive_at_start
+} 
+
+# make df of observed lifetimes
+st_obs <- tibble(day = 1:20,
+                 still_alive = still_alive)
+
+# plot observed and predicted survival to day
+  ggplot() +
+  geom_line(data = st_pred,
+            aes(x = day, y = st)) +
+  geom_point(data = st_obs,
+             aes(x = day, y = still_alive)) +
+    labs(title = "observed vs predicted age-specific survival",
+         y = "probability of survival",
+         x = "weevil age (days)")
 ```
 
 
