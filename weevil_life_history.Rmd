@@ -281,6 +281,9 @@ sex.predict <- covariate.predictions( weevil.results$S.sex,
 sexshell.predict <- covariate.predictions( weevil.results$S.sexshell, 
                                        indices = 1, data = pred_data )
 
+sexshellfull.predict <- covariate.predictions( weevil.results$S.sexshellfull, 
+                                       indices = 1, data = pred_data )
+
 averaged.predict <- covariate.predictions(weevil.results, # averaged model estimates by weight
                                         indices = 1, data = pred_data)
 # combine predictions into a single df
@@ -288,8 +291,18 @@ pred_list <-
   list(intercept.predict$estimates
 ,shell.predict$estimates
 ,sex.predict$estimates
-,sexshell.predict$estimates )#, averaged.predict$estimates)
-names(pred_list) <- c("survival ~ intercept", "survival ~ shell", "survival ~ sex", "survival ~ sex + shell")#, "averaged")
+,sexshell.predict$estimates 
+,sexshellfull.predict$estimates
+#,averaged.predict$estimates)
+)
+
+names(pred_list) <- c("survival ~ intercept"
+                      , "survival ~ shell"
+                      , "survival ~ sex"
+                      , "survival ~ sex + shell"
+                      , "survival ~ sex * shell"
+                      #, "averaged"
+                      )
 
 pred_plot <- do.call(rbind, lapply (names(pred_list), function(x) data.frame(pred_list[[x]], model = x)) ) %>%
   select(model, sex, pct_shell, estimate, lcl, ucl) %>%
@@ -347,7 +360,6 @@ weevil.results$S.time$results$real %>% rowid_to_column("day") %>%
   geom_ribbon(aes(x = day, ymin = lcl, ymax = ucl), alpha = 0.5)
 ```
 
-
 The estimates seem reasonable. The estimated survival probabilities are in line with the mean lifetimes shown in the first figure. 
 
 ### Thoughts
@@ -368,6 +380,54 @@ The next step is to investigate:
 as functions of food quality. 
 
 Once I've done that I'll make population projection matrices with these estimates and compare them with Markus'.
+
+# EDIT: compare constant and age-varying survival models
+Note that "time" in these models is synonymous with age (in days), since the times are days since emergence.
+
+It is obvious why the S(t) ~ model fits better than S ~ models. Weevil lifetimes is not well-described by the exponential distribution. This implies that population structure (adult age) may be important to explicitly model.
+
+How do I do time to survival analysis for non-exponentially distributed lifetimes? The KM curve looks concave-down, there is probably a less parameter-rich model for survival times.
+
+```{r calc_St}
+# get S(t) for all models.
+# need to figure out how to propagate CI forward
+pred_plot_km <-
+  pred_plot %>%
+  group_by(model, sex, pct_shell) %>%
+  mutate(day = map(estimate, function(x) 1:20),
+         st = map(estimate, function(x) x^(1:20))) %>%
+  unnest(cols = c(day, st)) %>%
+  select(model, sex, pct_shell, day, st)# %>%
+  # mutate(check_st = estimate^day, # double chekc that results are correct
+  #        is_wrong = ifelse(st == check_st, FALSE, TRUE)) %>%
+  # summarise(not_same = sum(is_wrong)) # everything is fine if not_same == 0
+
+st_pred <-
+  weevil.results$S.time$results$real %>% 
+  rowid_to_column("day") %>%
+  mutate(model = as.factor("S ~ time"),
+         sex = as.numeric(NA),
+         pct_shell = as.numeric(NA) ) %>%
+  select(model, sex, pct_shell, day, st = estimate)
+
+
+#bind_rows(list(pred_plot_km, st_pred)) %>%
+  #pred_plot_km %>%
+  ggplot() +
+  geom_line(data = pred_plot_km, 
+            aes(x = day, y = st, linetype = as.factor(sex), col = as.factor(pct_shell) ),
+            size = 1.5) +
+    geom_line(data = st_pred,
+              aes(x = day, y = st),
+              size = 1.5) +
+  ylim(0, 1) +
+  facet_wrap(~model)
+
+# st_pred %>%
+#   ggplot(aes(x = day, y = st)) +
+#   geom_line()
+```
+
 
 ```{r, eval = FALSE}
 # time model
