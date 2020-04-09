@@ -139,7 +139,7 @@ surv_data %>%
 
 ### Kaplan-Meier survival analysis
 
-All models assume constant survival probability. When I tried to estimate time specific survival probabilities but I got S(t) = 1 for all time points. Not sure what the issue is there.
+All models assume constant survival probability except for the S ~ time model.
 
 ```{r run_known_fate, include = FALSE}
 library(RMark)
@@ -168,6 +168,16 @@ weevil.Mark <- function () {
 weevil.results <- weevil.Mark()
 
 ```
+
+```{r eval = FALSE}
+# try survminer to plot survival curves
+library(survminer)
+?Surv
+surv_obj <- surv_fit(survival::Surv(lifetime) ~ 1, data = surv_data)
+
+ggsurvplot(surv_obj)
+```
+
 
 <!-- should add plot of regression coefficients for each model -->
 
@@ -325,7 +335,7 @@ ggplot(pred_plot, aes(x = pct_shell, y = estimate, group = sex, linetype = facto
 
 Same plot but with the observed data overlaid onto estimates (outliers removed). Useful or too busy?
 
-```{r warning = FALSE}
+```{r warning = FALSE, eval = FALSE}
 # per above comment, trying to add observed data to predicted survival
 ggplot() +
   geom_line(data    = pred_plot, 
@@ -384,9 +394,24 @@ Once I've done that I'll make population projection matrices with these estimate
 # EDIT: compare constant and age-varying survival models
 Note that "time" in these models is synonymous with age (in days), since the times are days since emergence.
 
-It is obvious why the S(t) ~ model fits better than S ~ models. Weevil lifetimes is not well-described by the exponential distribution. This implies that population structure (adult age) may be important to explicitly model.
+It is obvious why the S(t) ~ model fits better than S ~ models. Weevil lifetimes is not well-described by the exponential distribution. This implies that population structure (adult age) may be important to explicitly model. However, I don't think it is reasonable to select the particular time-varying model I've fit here. Essentially, the model is an alternative way of encoding the information in the (non-stratified) data. This is why the "estimated" and observed survivals are exactly the same. I think it would be better I could use a model that doesn't assume risk is constant like the exponential assumption rather than using the S ~ time model. Or, alternatively, I could "chunk" the ages of weevils into intervals that make sense, e.g., 1 day old, 2-3 days, etc.
 
 How do I do time to survival analysis for non-exponentially distributed lifetimes? The KM curve looks concave-down, there is probably a less parameter-rich model for survival times.
+
+I think that modeling survival using a Weibull distribution would make sense. The Weibull distribution allows for risk that changes over time instead of remaining constant like in exponential case.
+
+<!-- **Wait, why is S(t) not a decreasing function? This shouldn't be possible. ** -->
+
+<!-- I'm plotting the "real" parameters from the S ~ time model fitted in MARK.  -->
+<!-- According to the [known fate chapter](http://www.phidot.org/software/mark/docs/book/pdf/chap16.pdf) the MARK guidebook survival is modeled using a binomial survival model. -->
+
+<!-- \begin{align*} -->
+<!-- \hat{S}(t) & = \Pi_{i = 1}^t \left( \frac{n_i - d_i}{n_i} \right) -->
+<!-- \end{align*} -->
+
+<!-- Where $\hat{S}(t)$ is the estimated probability of surviving more than $t$ units of time, $n_i$ is the total number at risk at the beginning of the interval, and $y_i$ is the number surviving to the end of the interval. -->
+
+<!-- From its definition, this binomial survival function should be non-increasing. However, the mark estimates do not obey this. -->
 
 ```{r calc_St}
 # get S(t) for all models.
@@ -397,10 +422,15 @@ pred_plot_km <-
   mutate(day = map(estimate, function(x) 1:20),
          st = map(estimate, function(x) x^(1:20))) %>%
   unnest(cols = c(day, st)) %>%
-  select(model, sex, pct_shell, day, st)# %>%
+  select(model, sex, pct_shell, day, st) %>%
+  ungroup() %>%
+  mutate(sex = case_when(sex == 0 ~ "female",
+                         sex == 1 ~ "male")) # %>%
   # mutate(check_st = estimate^day, # double chekc that results are correct
   #        is_wrong = ifelse(st == check_st, FALSE, TRUE)) %>%
   # summarise(not_same = sum(is_wrong)) # everything is fine if not_same == 0
+
+# get km data from S ~ time model
 
 st_pred <-
   weevil.results$S.time$results$real %>% 
@@ -410,22 +440,58 @@ st_pred <-
          pct_shell = as.numeric(NA) ) %>%
   select(model, sex, pct_shell, day, st = estimate)
 
+# maybe I need to take the product of the real estimates from mark?
+# Yes, it is necessary to take the cumulative product. MARK's "real" survival is for survival over the interval.
+st_pred$cumSurv <- cumprod(st_pred$st)
 
-#bind_rows(list(pred_plot_km, st_pred)) %>%
-  #pred_plot_km %>%
-  ggplot() +
-  geom_line(data = pred_plot_km, 
-            aes(x = day, y = st, linetype = as.factor(sex), col = as.factor(pct_shell) ),
-            size = 1.5) +
-    geom_line(data = st_pred,
-              aes(x = day, y = st),
-              size = 1.5) +
-  ylim(0, 1) +
-  facet_wrap(~model)
-  
+# equivalent ways of getting estimates of S(t)
+# get.real(weevil.results$S.time, parameter = "S")
+# weevil.results$S.time$results$real
+
+# get empircally observed km data
+# calculate prop still alive at ages 1:20 days
+still_alive <- numeric(length = 20) 
+alive_at_start <- sum(surv_data$lifetime >= 1)
+for(i in 1:20) {
+  still_alive[i] <- sum(surv_data$lifetime >= i)/ alive_at_start
+} 
+
+# make df of observed lifetimes
+st_obs <- tibble(day = 1:20,
+                 still_alive = still_alive)
+
 ```
 
-```{r}
+```{r plot_surv_curves}
+# plot al km curves for model estimates and compare with observed survival curves
+ggplot() +
+  geom_line(
+            # data = filter(pred_plot_km, model %in% c("survival ~ intercept"
+            #                                          , "survival ~ sex"))
+            data = pred_plot_km
+            ,aes(x = day
+                 ,y = st
+                 ,linetype = as.factor(sex)
+                 ,col = as.factor(pct_shell)
+                )
+            ,size = 1.5) +
+  geom_step(data = st_pred
+            ,aes(x = day, y = cumSurv)
+            ,size = 1.5) +
+  geom_step(data = st_obs,
+            aes(x = day, y = still_alive)) +
+  ylim(0, 1) +
+  facet_wrap(~model) +
+  labs(title = "Survival curves of adult weevils",
+       subtitle = "Thin lines are observed survival curves (not stratified).",
+       y = "Probability of survival",
+       x = "Weevil age (day)",
+       linetype = "sex", col = "% shell")
+```
+
+
+```{r eval = FALSE}
+#### I'm pretty sure none of this code is correct
 
 # prop. still alive stratified by pect_shell and gender
 st_obs_sexshell <-
@@ -440,14 +506,14 @@ surv_data %>%
 
 # unstratified prop. still alive
 # something is wrong here
-st_obs <-
-  surv_data %>%
-  ungroup() %>%
-  mutate(n0 = length(unique(ID))) %>%
-  group_by(lifetime) %>%
-  mutate(still_alive = length(unique(ID)) / n0) %>%
-  arrange(lifetime) %>% select(lifetime, still_alive)
-  
+# st_obs <-
+#   surv_data %>%
+#   ungroup() %>%
+#   mutate(n0 = length(unique(ID))) %>%
+#   group_by(lifetime) %>%
+#   mutate(still_alive = length(unique(ID)) / n0) %>%
+#   arrange(lifetime) %>% select(lifetime, still_alive)
+#   
 sum(surv_data$lifetime >= 1)
 
 surv_data %>%
@@ -460,7 +526,7 @@ surv_data %>%
 
 ```
 
-```{r compare_obs_predicted_st}
+```{r compare_obs_predicted_st, eval = FALSE}
 # calculate prop still alive at ages 1:20 days
 still_alive <- numeric(length = 20) 
 alive_at_start <- sum(surv_data$lifetime >= 1)
@@ -472,11 +538,23 @@ for(i in 1:20) {
 st_obs <- tibble(day = 1:20,
                  still_alive = still_alive)
 
+st_pred_alone <-
+  weevil.results$S.time$results$real %>% 
+  rowid_to_column("day") %>%
+  mutate(model = as.factor("S ~ time"),
+         sex = as.numeric(NA),
+         pct_shell = as.numeric(NA) ) %>%
+  select(model, sex, pct_shell, day, st = estimate, lcl, ucl)
+
 # plot observed and predicted survival to day
   ggplot() +
-  geom_line(data = st_pred,
+  geom_point(data = st_pred_alone,
+            aes(x = day, y = st), size = 2) +
+  geom_line(data = st_pred_alone,
             aes(x = day, y = st)) +
-  geom_point(data = st_obs,
+  geom_ribbon(data = st_pred_alone,
+              aes(x = day, ymin = lcl, ymax = ucl), alpha = 0.5) +
+  geom_step(data = st_obs,
              aes(x = day, y = still_alive)) +
     labs(title = "observed vs predicted age-specific survival",
          y = "probability of survival",
