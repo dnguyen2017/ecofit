@@ -214,6 +214,14 @@ summary(pop_global)
 summary(r_global)
 ```
 
+```{r check_global_convergence}
+pop_global_all <- allFit(pop_global)
+pop_global_all_ss <- summary(pop_global_all)
+
+pop_global_all_ss$which.ok
+```
+
+
 ### Model diagnostics
 
 ```{r}
