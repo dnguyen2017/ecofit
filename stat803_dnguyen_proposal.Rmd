@@ -2,12 +2,14 @@
 title: "Deterministic and stochastic effects of food quality on extinction time"
 author: "David Nguyen"
 date: "October 20, 2020"
-output: html_document
+output: 
+  html_document:
+    code_folding: hide
 bibliography: nres803.bib
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(readxl)
 library(lme4)
@@ -110,10 +112,13 @@ weevil <-
   mutate(last_day = min(last_day, na.rm = TRUE)) %>%
   mutate(total = ifelse(days > last_day, NA, total)) %>%
   mutate(last_day = ifelse(last_day == Inf, NA, last_day)) %>%
-  # get next total, compute r, and make a new treatment col that is a factor
+  # get next total, ln(abundance + 1), compute r, and make a new treatment col that is a factor
   mutate(next_total = lead(total),
+         l_total = log(total + 1),
+         l_next_total = log(next_total + 1),
          r = log((next_total + 1)/(total + 1)),
-         ftreatment = as.factor(treatment)) %>%
+         ftreatment = as.factor(treatment),
+         time = (days - 32)/4) %>%
   unite(c("treatment", "replicate"), col = "rep_trt", remove = FALSE)
 ```
 
@@ -161,11 +166,11 @@ The discrete-time stochastic Gompertz model will be fit to the remainder of weev
 The full model is as follows:
 
 $$y_{t+1,i,j} = a_i + b_i y_t + c_i + d_j + \epsilon_{t,i,j} \\
-\epsilon_t \sim N(0,\sigma_0^2)\\
+\epsilon_{t,i,j} \sim N(0,\sigma_0^2)\\
 c_i \sim N(0, \sigma_i^2)\\
-d_j \sim N(0, \sigma_j^2)$$
+d_{ij} \sim N(0, \sigma_{rep}^2)$$
 
-Where $y_{t,i,j}$ is the log-population abundance at times $t$ for peanut shell percentages $i = 0, 3, 5, 10, 15$ and replicates $j = 1, \ldots, 10$. The deterministic (fixed-effect) of food quality operates on weevil populations are represented by the population growth rate ($a_i$) and the strength of density dependence ($b_i$). The stochastic (random-effect) of food quality on weevil populations are represented by a food-specific increase in variance of population growth ($c_i$) from time step $t$ to $t+1$. The random effect of replicate and random error are denoted $d_j$ and $epsilon_{t,i,j}$ respectively.
+Where $\ln(N_{t,i,j} + 1) = y_{t,i,j}$ is the log-population abundance at times $t$ for peanut shell percentages $i = 0, 3, 5, 10, 15$ and replicates $j = 1, \ldots, 10$. The deterministic (fixed-effect) of food quality operates on weevil populations are represented by the population growth rate ($a_i$) and the strength of density dependence ($b_i$). The stochastic (random-effect) of food quality on weevil populations are represented by a food-specific increase in variance of population growth ($c_i$) from time step $t$ to $t+1$. The random effect of replicate and random error are denoted $d_j$ and $epsilon_{t,i,j}$ respectively.
 
 The model that includes only the deterministic impact of food quality is obtained by dropping the $c_i$ term. The model for only the stochastic impact of food quality is obtained by estimating a common population growth rate ($a$) and density dependence coefficient ($b$) across all food quality treatments.
 
@@ -176,6 +181,10 @@ The model that includes only the deterministic impact of food quality is obtaine
 <!-- ### Model set -->
 
 <!-- Full model -->
+
+### Estimating carrying capacity
+
+The expected log-abundance is $E(X_{\infty,i}) = a_i/(1-b_i)$, the variance of the stationary distribution of the log population is $V(X_{\infty,i}) = \sigma^2/(1-b_i)$, and the mean of the log-normal distribution of abundance is $E(N_{\infty,i}) = \exp[E(X_{\infty,i}) + V(X_{\infty,i})/2]$ [@dennis_estimating_2006].
 
 ### Evaluating goodness of fit
 
@@ -201,17 +210,26 @@ weevil %>%
   labs(title = "Distribution of observed extinction times")
 ```
 
+# Results
+
+### Model fitting
+
 ```{r fit_global_model}
-pop_global <- lmer(next_total ~ total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
+pop_global <- lmer(l_next_total ~ l_total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
      data = weevil,
      REML = FALSE)
 
-r_global <- lmer(r ~ total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
+r_global <- lmer(r ~ l_total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
      data = weevil,
      REML = FALSE)
 
 summary(pop_global)
 summary(r_global)
+
+# get fixed effect estimates from both models
+cbind(fixef(pop_global), fixef(r_global)) %>%
+  as_tibble(rownames = "coefficient") %>%
+  rename("log gompertz" = 2, "population growth" = 3)
 ```
 
 ```{r check_global_convergence}
@@ -221,10 +239,43 @@ pop_global_all_ss <- summary(pop_global_all)
 pop_global_all_ss$which.ok
 ```
 
+### Are fixed effect estimates the same?
+
+```{r}
+pop_rand_trt <- lmer(l_next_total ~ l_total*ftreatment + (1 | ftreatment),
+     data = weevil,
+     REML = FALSE)
+
+#summary(pop_rand_trt)
+
+pop_rand_rep <- lmer(l_next_total ~ l_total*ftreatment + (1 | rep_trt),
+     data = weevil,
+     REML = FALSE)
+
+#summary(pop_rand_rep)
+
+
+pop_rand_none <- lm(l_next_total ~ l_total*ftreatment,
+     data = weevil)
+
+summary(pop_rand_none)
+
+all.equal(fixef(pop_global), fixef(pop_rand_trt), fixef(pop_rand_rep), coef(pop_rand_none))
+```
+
+```{r}
+cbind(fixef(pop_global), fixef(pop_rand_trt), fixef(pop_rand_rep), coef(pop_rand_none)) %>%
+  as_tibble(rownames = "coefficient") %>%
+  rename("random trt and rep" = 2, "random trt" = 3, "random rep" = 4, "no random effects" = 5) %>%
+  knitr::kable()
+
+AIC(pop_global, pop_rand_trt, pop_rand_rep, pop_rand_none)
+```
+
 
 ### Model diagnostics
 
-```{r}
+```{r pop_global_resids, message=FALSE, warning = FALSE}
 pg_fit <- 
   augment(pop_global, weevil) %>%
   rename(residuals = .resid, fitted = .fitted)
@@ -237,7 +288,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "0 % shell")
+       subtitle = "0 % shell")
 
 pg_fit %>%
   filter(ftreatment == 0.05) %>%
@@ -247,7 +298,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "5 % shell")
+       subtitle = "5 % shell")
 
 pg_fit %>%
   filter(ftreatment == 0.1) %>%
@@ -257,7 +308,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "10 % shell")
+       subtitle = "10 % shell")
 
 pg_fit %>%
   filter(ftreatment == 0.15) %>%
@@ -267,7 +318,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "15 % shell")
+       subtitle = "15 % shell")
 ```
 
 Plots of residuals vs. expected values look good for the one-step-ahead model.
@@ -283,7 +334,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "0 % shell")
+       subtitle = "0 % shell")
 
 pg_fit %>%
   filter(ftreatment == 0.05) %>%
@@ -293,7 +344,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "5 % shell")
+       subtitle = "5 % shell")
 
 pg_fit %>%
   filter(ftreatment == 0.1) %>%
@@ -303,7 +354,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "10 % shell")
+       subtitle = "10 % shell")
 
 pg_fit %>%
   filter(ftreatment == 0.15) %>%
@@ -313,7 +364,7 @@ pg_fit %>%
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
-       caption = "15 % shell")
+       subtitle = "15 % shell")
 ```
 
 ```{r lb_tests, eval = FALSE}
@@ -328,6 +379,57 @@ pg_fit %>%
   filter(treatment == 0, replicate == 1) %>%
   pull(residuals) %>%
   Box.test(lag = 10, type = "Ljung-Box")
+```
+
+```{r}
+rg_fit <- 
+  augment(r_global, weevil) %>%
+  rename(residuals = .resid, fitted = .fitted)
+
+rg_fit %>%
+  filter(ftreatment == 0) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for population growth model",
+       subtitle = "0 % shell")
+
+rg_fit %>%
+  filter(ftreatment == 0.05) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for population growth model",
+       subtitle = "5 % shell")
+
+rg_fit %>%
+  filter(ftreatment == 0.1) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for population growth model",
+       subtitle = "10 % shell")
+
+rg_fit %>%
+  filter(ftreatment == 0.15) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for population growth model",
+       subtitle = "15 % shell")
+
+```
+
+```{r}
+all.equal(pg_fit$residuals, rg_fit$residuals)
 ```
 
 
@@ -392,3 +494,66 @@ weevil %>%
   knitr::kable()
 ```
 
+### r vs. abundance
+
+```{r plot_r, fig.show="hold", out.width="50%"}
+weevil %>%
+  ggplot(aes(x = total, y = r)) +
+  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~treatment) + theme(legend.position = "n")
+
+weevil %>%
+  ggplot(aes(x = total, y = r)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_grid(ftreatment ~ replicate)
+```
+
+### r vs log-abundance
+
+```{r plot_r_log_total, fig.show="hold", out.width="50%"}
+weevil %>%
+  ggplot(aes(x = l_total, y = r)) +
+  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~treatment) + theme(legend.position = "n")
+
+weevil %>%
+  ggplot(aes(x = l_total, y = r)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_grid(ftreatment ~ replicate)
+```
+
+### (next_abundance + 1) vs (abundance + 1)
+
+```{r plot_next_pop, fig.show="hold", out.width="50%"}
+weevil %>%
+  ggplot(aes(x = total, y = next_total)) +
+  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~treatment) + theme(legend.position = "n")
+
+weevil %>%
+  ggplot(aes(x = total, y = next_total)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_grid(ftreatment ~ replicate)
+```
+
+### log(next_abundance + 1) vs log(abundance + 1)
+
+```{r plot_log_next_pop, fig.show="hold", out.width="50%"}
+weevil %>%
+  ggplot(aes(x = l_total, y = l_next_total)) +
+  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~treatment) + theme(legend.position = "n")
+
+weevil %>%
+  ggplot(aes(x = l_total, y = l_next_total)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_grid(ftreatment ~ replicate)
+```
