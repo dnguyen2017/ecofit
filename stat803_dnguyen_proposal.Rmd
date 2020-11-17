@@ -1,0 +1,266 @@
+---
+title: "Deterministic and stochastic effects of food quality on extinction time"
+author: "David Nguyen"
+date: "October 20, 2020"
+output: html_document
+bibliography: nres803.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(readxl)
+library(lme4)
+```
+
+```{r munge_data, include = FALSE}
+# get names of sheets that contain pop data (not including T15-8 for now)
+sheet_names <- excel_sheets("weevil_data/pop_dynamics_expt_data.xlsx")
+sheet_pops <- sheet_names[1:5]
+pct_peanut_shells <- c(0, 0.03, 0.05, 0.10, 0.15)
+
+# create new colnames
+npop <- 10
+date_cols <- c("days", "date")
+demo_cols <- unlist(lapply(1:npop,
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+treatment_cols <- c("m_added", "f_added", "pellets", "noclue", "treatment")
+
+# read-in and reformat all population data sheets
+
+list_dfs <- vector("list", length = length(sheet_pops)) # init list to store each df
+
+# loop to read and reformat
+for (i in seq_along(sheet_pops)) {
+  df_now <-
+    read_excel("weevil_data/pop_dynamics_expt_data.xlsx",
+               skip = 3,
+               sheet = sheet_pops[i]) %>%
+    mutate(treatment = pct_peanut_shells[i])
+  
+  # assign new colnames
+  names(df_now) <-
+    c(date_cols, demo_cols, treatment_cols) # should include check to make sure all data sheets have same format
+  
+  # T15 has weird ??? in a col. CHange to NA and convert col to numeric
+  if (i == 5) {
+    df_now$m_alive_8 <-
+      df_now %>% 
+      mutate_at(vars('m_alive_8'), ~na_if(., '???')) %>%
+      pull(m_alive_8) %>%
+      as.numeric()
+  }
+  
+  # make data longer for plotting
+  df_long <- df_now %>%
+    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, m_added, f_added,treatment),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    ungroup()
+  
+  # save to list
+  list_dfs[[i]] <- df_long
+}
+
+full_df <- bind_rows(list_dfs)
+
+full_df <- full_df %>% mutate(replicate = as.numeric(replicate))
+#full_df$treatment <- as_factor(full_df$treatment) # for proper facetting when plotting. Should convert to numeric instead.
+```
+
+```{r clean_for_analysis, warning = FALSE}
+# verify that "total" is the same regardless of sex (which wasn't actually distinguished during expt)
+# all.equal( filter(full_df, sex == "m") %>% pull(total), filter(full_df, sex == "f") %>% pull(total) )
+weevil <-
+  full_df %>%
+  filter(sex == "m",  # remove duplicate rows of "total"
+         is.na(m_added)) %>% # Only include data after initialization complete
+  select(days, treatment, replicate, total) %>% # drop all unimportant cols
+  filter(treatment != 0.03) # drop 3 % shell treatment, since it is diff length and was only initialized 20 days instead of 32 like others
+
+# set all "total" values to NA after extinction
+# I will define exinction as the last time the cumulative population total increases
+# e.g., take cumsum for all trt X rep combinations, then get index where cumsum(total) == max(cumsum), set all total values afterwards to NA
+
+weevil <- 
+  weevil %>% 
+  group_by(treatment, replicate) %>%
+  mutate(cumtotal = cumsum(total), 
+         max_cumtotal = max(cumtotal)) %>%
+  rowwise() %>%
+  mutate(last_day = ifelse( (cumtotal == max_cumtotal) && (total == 0), days, NA)) %>%
+  group_by(treatment, replicate) %>%
+  mutate(last_day = min(last_day, na.rm = TRUE)) %>%
+  mutate(total = ifelse(days > last_day, NA, total)) %>%
+  mutate(last_day = ifelse(last_day == Inf, NA, last_day)) %>%
+  mutate(next_total = lead(total),
+         r = log((next_total + 1)/(total + 1)))
+```
+
+
+# Introduction
+
+Habitat degredation a major threat to animal populations [@sala_global_2000]. As a consequence, food quality may also be reduced which are known to have strong impacts on individual and population level growth [@awmack_host_2002; @griffen_effects_2008]. Poor food quality typically decrease fecundity and increase development time which may, in turn, reduce population level growth rates and carrying capacity. In experimental studies, the effects of food quality on population parameters are quantified by including food quality as a covariate for estimating population parameters; however, to the best of my knowledge, the effect of food quality on the variability of population parameters is not routinely quantified despite clear signals of food-quality specific variability in experimental data [cf. figure 2 in @griffen_effects_2008].
+
+Both deterministic and stochastic forces drive population dynamics and extinction risk [@bjornstad_noisy_2001; @fung_partitioning_2019]. For example, low population growth rates are a deterministic driver of population declines whereas variability in population growth rates is a stochastic driver of increased extinction risk [@vucetich_population_2000]. Appropriately modeling the sources of stochasticity is important for accurate modeling of population dynamics and extinction risk [@melbourne_extinction_2008]. Therefore, when modeling the effect of a food quality on population growth it may be important to consider both fixed and random effects for accurate assessments of extinction risk.
+
+The main objective of this analysis is to identify the relative contributions of the deterministic and stochastic impact of resource quality on extinction time. Food quality may impact populations deterministically by affecting population growth rate and/or carrying capacity and stochastically by increasing variability of environmental noise. I will use existing time-series data of southern cowpea weevil (*Callosobruchus maculatus*) populations subjected to food quality treatments (M. Dyck unpublished). To quantify the contribution of deterministic and stochastic effects of food quality, I will fit a set of population models to the bean weevil data that allow for:
+
+1. Growth rate and density dependence to vary with food quality;
+2. An additive effect of food quality on environmental noise;
+3. Both 1 and 2.
+
+The models will be compared by AIC and goodness of fit will be assessed by comparing the extinction frequency and extinction time distribution of the observed weevil populations and simulations from fitted models. 
+
+# Materials and methods
+
+### Bean weevil population data
+
+```{r plot_all}
+full_df %>%
+  ggplot(aes(x = days, y = total, group = replicate, col = as.factor(replicate) )) +
+  geom_line() + 
+  facet_wrap(~treatment) +
+  theme_light() +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(0, 650, by = 100)) +
+  scale_y_continuous(breaks = seq(0, 50, by = 10)) +
+  labs(title = "Bean weevil populations over time",
+       caption = "For each plot, weevils were fed pellets with a different proportion of peanut shell additive.\nEach color is a different replicate.",
+       y = "Bean weevil count",
+       x = "Time (days)")
+
+```
+
+The quality of food provided to the weevils was experimentally manipulated by manufacturing artificial bean pellets made from ground black-eyed pea powder and varying percentages of powdered peanut shells (0, 3, 5, 10, and 15 %). Larger percentages of peanut shell simulate lower food quality.  To initialize each replicate population, two males and two females were added every four days for the first 28 days of the experiment. After this initialization, two fresh bean pellets were added weekly without any further addition of adults. There were 10 replicate populations allocated to each treatment resulting in a total of 50 population time-series. Populations were maintained until the populations crashed or were stopped after 632 days (the 3 % peanut shell treatment was started later and ran for 400 days). A complete census of adult bean weevils was conducted every four days.
+
+### Model structure and fitting
+
+The discrete-time stochastic Gompertz model will be fit to the remainder of weevil abundances after the initialization phase is removed. The Gompertz model is commonly used for modeling ecological populations [@dennis_estimating_2006]. The models will be estimated using a one-step fitting procedure which assumes that there is no observation noise [@bolker_ecological_2008]; this is an appropriate assumption since the populations were completely censused at each time point. 
+
+The full model is as follows:
+
+$$y_{t+1,i,j} = a_i + b_i y_t + c_i + d_j + \epsilon_{t,i,j} \\
+\epsilon_t \sim N(0,\sigma_0^2)\\
+c_i \sim N(0, \sigma_i^2)\\
+d_j \sim N(0, \sigma_j^2)$$
+
+Where $y_{t,i,j}$ is the log-population abundance at times $t$ for peanut shell percentages $i = 0, 3, 5, 10, 15$ and replicates $j = 1, \ldots, 10$. The deterministic (fixed-effect) of food quality operates on weevil populations are represented by the population growth rate ($a_i$) and the strength of density dependence ($b_i$). The stochastic (random-effect) of food quality on weevil populations are represented by a food-specific increase in variance of population growth ($c_i$) from time step $t$ to $t+1$. The random effect of replicate and random error are denoted $d_j$ and $epsilon_{t,i,j}$ respectively.
+
+The model that includes only the deterministic impact of food quality is obtained by dropping the $c_i$ term. The model for only the stochastic impact of food quality is obtained by estimating a common population growth rate ($a$) and density dependence coefficient ($b$) across all food quality treatments.
+
+<!-- A likely short-coming of the models I will fit is that the models only include the effect of the previous log-population abundance on the size of the next log-population abundance. However, the sampling frequency (every four days) is much shorter than the generation times of the weevils which range between 20 and 60 days depending on resource quality. A more careful analysis would involve assessing the number of lagged population sizes to capture the dynamics of the population data. -->
+<!-- * assumes process noise only (ok because population are completely censused at each observation time; Ben Bolker book) -->
+<!-- * higher-order lags can be collected into error term. Shaky assumption, especially considering that larvae and eggs are unobserved. A suitable approach would be to try using additional lagged terms which can be justified by Takens theorem (see ellner and turchin paper). -->
+
+<!-- ### Model set -->
+
+<!-- Full model -->
+
+### Evaluating goodness of fit
+
+Assessing the goodness of fit for noisy populations is challenging because sensitivity to small changes in initial conditions and process noise may generate very different population trajectories [@wood_statistical_2010]. To avoid these issues, I will assess goodness of fit by comparing summary statistics of the observed data to the same summary statistics computed for simulated output from the fitted Gompertz models. For each fitted model, I will repeatedly simulate the model for the same number of time steps the experimental populations were observed and the same number of replicates used in the experiment. The summary statistics I will use are: (1) the frequency of populations that became extinct; (2) the distribution of time to extinction, conditioned on having observed extinctions.
+
+<!-- Statistical probes  ala Simon Wood (2010) -->
+
+<!-- * Use ar(1) and extinction time as statistical summaries -->
+<!-- * maybe use rolling mean and variance too? -->
+
+```{r plot_obs_extinction_time}
+weevil %>%
+  group_by(treatment, replicate) %>%
+  slice(1) %>%
+  summarise(last_day) %>%
+  group_by(treatment) %>%
+  mutate(mean_time = mean(last_day, na.rm = TRUE),
+         treatment = as.factor(treatment)) %>%
+  ggplot() +
+  geom_histogram(aes(x = last_day, group = treatment)) +
+  geom_vline(aes(xintercept = mean_time, group = treatment), size = 1.5, linetype = 2) +
+  facet_wrap(~treatment) +
+  labs(title = "Distribution of observed extinction times")
+```
+
+```{r fit_global_model}
+lmer()
+
+```
+
+
+# References {-}
+
+<div id="refs"></div>
+
+# More plots
+
+```{r}
+# increments for x and y axis
+inc_total <- 5
+inc_days <- 50 
+
+# get max days and total, each rounded to the nearest value of inc_*
+spark_lims <- 
+  full_df %>% 
+  select(days, total) %>% 
+  summarise(max_days = ceiling(max(days)/inc_days)*inc_days, 
+            max_total = ceiling(max(total)/inc_total) * inc_total )
+
+spark_list <- lapply(seq_along(pct_peanut_shells),
+                     function(x)
+                       full_df %>%
+  filter(treatment == pct_peanut_shells[x]) %>%
+  ggplot(aes(x = days, y = total)) +
+  geom_line() +
+  scale_y_continuous(breaks = seq(0, spark_lims$max_total, by = 2*inc_total),
+                     limits = c(0, spark_lims$max_total)) +
+  scale_x_continuous(breaks = seq(0, spark_lims$max_days, by = 2*inc_days),
+                     limits = c(0, spark_lims$max_days)) +
+  labs(title = paste0(pct_peanut_shells[x]*100, " % peanut shell in food pellets")) +
+  facet_wrap(~replicate))
+
+# 0 % peanut shells
+spark_list[[1]]
+```
+
+```{r}
+spark_list[[2]]
+```
+
+```{r}
+spark_list[[3]]
+```
+
+```{r}
+spark_list[[4]]
+```
+
+```{r}
+spark_list[[5]]
+```
+
+```{r extinction_table}
+weevil %>%
+  group_by(treatment, replicate) %>%
+  slice(1) %>%
+  summarise(last_day) %>%
+  filter(!is.na(last_day)) %>%
+  arrange(treatment, replicate) %>%
+  knitr::kable()
+```
+
