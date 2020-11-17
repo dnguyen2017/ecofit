@@ -109,8 +109,11 @@ weevil <-
   mutate(last_day = min(last_day, na.rm = TRUE)) %>%
   mutate(total = ifelse(days > last_day, NA, total)) %>%
   mutate(last_day = ifelse(last_day == Inf, NA, last_day)) %>%
+  # get next total, compute r, and make a new treatment col that is a factor
   mutate(next_total = lead(total),
-         r = log((next_total + 1)/(total + 1)))
+         r = log((next_total + 1)/(total + 1)),
+         ftreatment = as.factor(treatment)) %>%
+  unite(c("treatment", "replicate"), col = "rep_trt", remove = FALSE)
 ```
 
 
@@ -198,7 +201,20 @@ weevil %>%
 ```
 
 ```{r fit_global_model}
-lmer()
+pop_global <- lmer(next_total ~ total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
+     data = weevil,
+     REML = FALSE)
+
+r_global <- lmer(r ~ total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
+     data = weevil,
+     REML = FALSE)
+
+summary(pop_global)
+summary(r_global)
+```
+
+
+```{r}
 
 ```
 
