@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(readxl)
 library(lme4)
+library(broom.mixed)
 ```
 
 ```{r munge_data, include = FALSE}
@@ -215,7 +216,49 @@ summary(r_global)
 
 
 ```{r}
+pg_fit <- 
+  augment(pop_global, weevil) %>%
+  rename(residuals = .resid, fitted = .fitted)
 
+pg_fit %>%
+  filter(ftreatment == 0) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 1, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       caption = "0 % shell")
+
+pg_fit %>%
+  filter(ftreatment == 0.05) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 1, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       caption = "5 % shell")
+
+pg_fit %>%
+  filter(ftreatment == 0.1) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 1, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       caption = "10 % shell")
+
+pg_fit %>%
+  filter(ftreatment == 0.15) %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 1, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       caption = "15 % shell")
 ```
 
 
