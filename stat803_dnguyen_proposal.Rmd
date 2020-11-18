@@ -278,14 +278,43 @@ AIC(pop_gls_none, pop_gls_trt, pop_lme_trt) %>%
   select(model, df, AIC, delta, weight) %>%
   knitr::kable(digits = 3)
 
+# get treatment specific sd of residuals
 augment(pop_gls_trt) %>%
   group_by(ftreatment) %>%
-  mutate(trt_resid = var(.resid),
+  mutate(trt_resid = sd(.resid),
          mean_resid = mean(.resid)) %>%
   slice(1) %>%
-  summarize(trt_resid, mean_resid)
+  ungroup() %>%
+  mutate(std_resid = trt_resid/min(trt_resid)) %>%
+  summarize(trt_resid, std_resid, mean_resid)
 
+pop_gls_trt %>%
+  augment() %>%
+  filter(ftreatment == 0) %>%
+  mutate(var_resid = var(.resid)) 
+
+augment(pop_gls_trt) %>%
+  pull(.resid) %>% hist()
 ```
+
+```{r}
+augment(pop_gls_trt) %>%
+  rename(fitted = .fitted, residuals= .resid) %>%
+  group_by(ftreatment) %>%
+  mutate(var_resid = var(residuals),
+         resid_lwr = -1.96*var_resid,
+         resid_upr = 1.96*var_resid) %>%
+  ggplot(aes(x = as.factor(replicate), y = residuals)) +
+  geom_boxplot() +
+  geom_jitter(aes(col = ftreatment, shape = ftreatment),alpha = 0.4)  +
+  geom_hline(yintercept = 0, linetype = 2, size = 1.5, alpha = 0.5) +
+  coord_flip() +
+  labs(title = "Residuals for ML estimated model",
+       col = "treatment", shape = "treatment",
+       x = "treatment x replicate") +
+  facet_wrap(~ftreatment)
+```
+
 
 
 ```{r check_global_convergence}
