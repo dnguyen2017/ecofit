@@ -117,9 +117,9 @@ weevil <-
          l_total = log(total + 1),
          l_next_total = log(next_total + 1),
          r = log((next_total + 1)/(total + 1)),
-         ftreatment = as.factor(treatment),
+         ftreatment = factor(treatment, levels = c("0", "0.05", "0.1", "0.15")),
          time = (days - 32)/4) %>%
-  unite(c("treatment", "replicate"), col = "rep_trt", remove = FALSE)
+  unite(c("ftreatment", "replicate"), col = "rep_trt", remove = FALSE)
 ```
 
 
@@ -232,6 +232,62 @@ cbind(fixef(pop_global), fixef(r_global)) %>%
   rename("log gompertz" = 2, "population growth" = 3)
 ```
 
+
+```{r reml_est, eval = FALSE}
+pop_global_reml <- lmer(l_next_total ~ l_total*ftreatment + (1 | ftreatment) + (1 | rep_trt),
+     data = weevil)
+summary(pop_global_reml)
+
+pop_trt_reml <- lmer(l_next_total ~ l_total*ftreatment + (1 | ftreatment),
+     data = weevil)
+summary(pop_trt_reml)
+```
+
+# Fit nlme
+
+```{r fit_nlme}
+library(nlme)
+
+# 1. homogenerous variance model
+# this is just lm() since I haven't specificed weights
+pop_gls_none <- gls(l_next_total ~ l_total*ftreatment - 1, 
+    data = weevil, 
+    method = "ML",
+    na.action=na.omit) # ignore na values
+
+# 2. treatment specific residual model
+pop_gls_trt <- gls(l_next_total ~ l_total*ftreatment -1, 
+    data = weevil, 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit) # ignore na values
+
+# 3. treatment specific residual model with random effect of rep*trt
+pop_lme_trt <- lme(l_next_total ~ l_total*ftreatment - 1, 
+    random = ~ 1 | rep_trt,
+    data = weevil, 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit) # ignore na values
+
+AIC(pop_gls_none, pop_gls_trt, pop_lme_trt) %>%
+  mutate(delta = AIC - min(AIC),
+         weight = exp(-delta/2),
+         weight = weight/sum(weight)) %>%
+  add_column(model = c("resid()", "resid(treatment)", "rand(rep), resid(variance)")) %>%
+  select(model, df, AIC, delta, weight) %>%
+  knitr::kable(digits = 3)
+
+augment(pop_gls_trt) %>%
+  group_by(ftreatment) %>%
+  mutate(trt_resid = var(.resid),
+         mean_resid = mean(.resid)) %>%
+  slice(1) %>%
+  summarize(trt_resid, mean_resid)
+
+```
+
+
 ```{r check_global_convergence}
 pop_global_all <- allFit(pop_global)
 pop_global_all_ss <- summary(pop_global_all)
@@ -322,6 +378,41 @@ pg_fit %>%
 ```
 
 Plots of residuals vs. expected values look good for the one-step-ahead model.
+
+Are the variances homogeneous across treatments?
+
+```{r}
+pg_fit %>%
+  ggplot(aes(x = ftreatment, y = residuals)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.2) 
+
+pg_fit %>%
+  ggplot(aes(x = rep_trt, y = residuals)) +
+  geom_boxplot() +
+  geom_jitter(aes(col = ftreatment, shape = ftreatment),alpha = 0.4)  +
+  geom_hline(yintercept = 0, linetype = 2, size = 1.5, alpha = 0.5) +
+  coord_flip() +
+  labs(title = "Residuals for ML estimated model",
+       col = "treatment", shape = "treatment",
+       x = "treatment x replicate")
+
+pg_fit %>%
+  group_by(ftreatment) %>%
+  mutate(resid_var = var(residuals)) %>%
+  slice(1) %>%
+  summarize(resid_var)
+
+# p_reml_fit <- augment(pop_trt_reml, weevil) %>% rename("residuals" = .resid, "fitted" = .fitted)
+# p_reml_fit %>%
+#   ggplot(aes(x = rep_trt, y = residuals)) +
+#   geom_boxplot() +
+#   geom_jitter(aes(col = ftreatment),alpha = 0.2)  +
+#   geom_hline(yintercept = 0, linetype = 2, size = 1.5, alpha = 0.5) +
+#   coord_flip()
+
+```
+
 
 But is there any autocorrelation in residuals? Lets look visually first, then check using ACF or Ljung-Box tests.
 
