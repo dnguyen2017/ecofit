@@ -492,9 +492,10 @@ filter(sims, ftreatment == 0) %>%
   facet_wrap(~replicate)
 ```
 
+To examine the effect of treatment specific variance in isolation I simulate the gompertz model using the fixed effects estimates for the control and the environmental variance estimates for each treatment.
 
 ```{r}
-sims_big_init <- lapply(1:nrow(init_df), function(x)
+sims_vary_noise <- lapply(1:nrow(init_df), function(x)
   sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
              lambda = unlist(init_df[1, "a"]), 
              b = unlist(init_df[1,"b"]), 
@@ -506,13 +507,56 @@ sims_big_init <- lapply(1:nrow(init_df), function(x)
   ) %>%
   bind_rows()
 
-sims_big_init %>%
+sims_vary_noise %>%
   ggplot() +
   geom_line(aes(x = time*4, y = N, group = replicate),, col = "red", alpha = 0.5) +
   #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
   facet_wrap(~ftreatment)
 ```
 
+Hold all parameters at control but use factor specific population growth rate
+
+```{r}
+sims_vary_a <- lapply(1:nrow(init_df), function(x)
+  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
+             lambda = unlist(init_df[x, "a"]), 
+             b = unlist(init_df[1,"b"]), 
+             sd_proc = unlist(init_df[1,"trt_resid"]), 
+             tfinal = unlist(init_df[x,"tfinal"]), 
+             nsim = 1,
+             replicate = unlist(init_df[x,"replicate"]),
+             ftreatment = unlist(init_df[x,"ftreatment"]))
+  ) %>%
+  bind_rows()
+
+sims_vary_a %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = replicate),, col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_wrap(~ftreatment)
+```
+
+Hold all parameters at control but use factor specific density dependence
+
+```{r}
+sims_vary_b <- lapply(1:nrow(init_df), function(x)
+  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
+             lambda = unlist(init_df[1, "a"]), 
+             b = unlist(init_df[x,"b"]), 
+             sd_proc = unlist(init_df[1,"trt_resid"]), 
+             tfinal = unlist(init_df[x,"tfinal"]), 
+             nsim = 1,
+             replicate = unlist(init_df[x,"replicate"]),
+             ftreatment = unlist(init_df[x,"ftreatment"]))
+  ) %>%
+  bind_rows()
+
+sims_vary_b %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = replicate),, col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_wrap(~ftreatment)
+```
 
 ```{r acf, eval = FALSE}
 # need to write code to extract lag(1) acf
@@ -537,6 +581,85 @@ augment(m3) %>%
        col = "treatment", shape = "treatment",
        x = "treatment x replicate") +
   facet_wrap(~ftreatment)
+```
+
+
+# References {-}
+
+<div id="refs"></div>
+
+```{r }
+knitr::knit_exit()
+```
+
+
+# More plots
+
+```{r}
+# increments for x and y axis
+inc_total <- 5
+inc_days <- 50 
+
+# get max days and total, each rounded to the nearest value of inc_*
+spark_lims <- 
+  full_df %>% 
+  select(days, total) %>% 
+  summarise(max_days = ceiling(max(days)/inc_days)*inc_days, 
+            max_total = ceiling(max(total)/inc_total) * inc_total )
+
+spark_list <- lapply(seq_along(pct_peanut_shells),
+                     function(x)
+                       full_df %>%
+  filter(treatment == pct_peanut_shells[x]) %>%
+  ggplot(aes(x = days, y = total)) +
+  geom_line() +
+  scale_y_continuous(breaks = seq(0, spark_lims$max_total, by = 2*inc_total),
+                     limits = c(0, spark_lims$max_total)) +
+  scale_x_continuous(breaks = seq(0, spark_lims$max_days, by = 2*inc_days),
+                     limits = c(0, spark_lims$max_days)) +
+  labs(title = paste0(pct_peanut_shells[x]*100, " % peanut shell in food pellets")) +
+  facet_wrap(~replicate))
+
+# 0 % peanut shells
+spark_list[[1]]
+```
+
+```{r}
+spark_list[[3]]
+```
+
+```{r}
+spark_list[[4]]
+```
+
+```{r}
+spark_list[[5]]
+```
+
+```{r extinction_table}
+weevil %>%
+  group_by(treatment, replicate) %>%
+  slice(1) %>%
+  summarise(last_day) %>%
+  filter(!is.na(last_day)) %>%
+  arrange(treatment, replicate) %>%
+  knitr::kable()
+```
+
+### log(next_abundance + 1) vs log(abundance + 1)
+
+```{r plot_log_next_pop, fig.show="hold", out.width="50%"}
+weevil %>%
+  ggplot(aes(x = l_total, y = l_next_total)) +
+  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~treatment) + theme(legend.position = "n")
+
+weevil %>%
+  ggplot(aes(x = l_total, y = l_next_total)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  facet_grid(ftreatment ~ replicate)
 ```
 
 ### Model diagnostics
@@ -662,82 +785,4 @@ m3_aug %>%
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "15 % shell")
-```
-
-# References {-}
-
-<div id="refs"></div>
-
-```{r}
-knitr::knit_exit()
-```
-
-
-# More plots
-
-```{r}
-# increments for x and y axis
-inc_total <- 5
-inc_days <- 50 
-
-# get max days and total, each rounded to the nearest value of inc_*
-spark_lims <- 
-  full_df %>% 
-  select(days, total) %>% 
-  summarise(max_days = ceiling(max(days)/inc_days)*inc_days, 
-            max_total = ceiling(max(total)/inc_total) * inc_total )
-
-spark_list <- lapply(seq_along(pct_peanut_shells),
-                     function(x)
-                       full_df %>%
-  filter(treatment == pct_peanut_shells[x]) %>%
-  ggplot(aes(x = days, y = total)) +
-  geom_line() +
-  scale_y_continuous(breaks = seq(0, spark_lims$max_total, by = 2*inc_total),
-                     limits = c(0, spark_lims$max_total)) +
-  scale_x_continuous(breaks = seq(0, spark_lims$max_days, by = 2*inc_days),
-                     limits = c(0, spark_lims$max_days)) +
-  labs(title = paste0(pct_peanut_shells[x]*100, " % peanut shell in food pellets")) +
-  facet_wrap(~replicate))
-
-# 0 % peanut shells
-spark_list[[1]]
-```
-
-```{r}
-spark_list[[3]]
-```
-
-```{r}
-spark_list[[4]]
-```
-
-```{r}
-spark_list[[5]]
-```
-
-```{r extinction_table}
-weevil %>%
-  group_by(treatment, replicate) %>%
-  slice(1) %>%
-  summarise(last_day) %>%
-  filter(!is.na(last_day)) %>%
-  arrange(treatment, replicate) %>%
-  knitr::kable()
-```
-
-### log(next_abundance + 1) vs log(abundance + 1)
-
-```{r plot_log_next_pop, fig.show="hold", out.width="50%"}
-weevil %>%
-  ggplot(aes(x = l_total, y = l_next_total)) +
-  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
-  geom_smooth(method = "lm") +
-  facet_wrap(~treatment) + theme(legend.position = "n")
-
-weevil %>%
-  ggplot(aes(x = l_total, y = l_next_total)) +
-  geom_point(alpha = 0.4) +
-  geom_smooth(method = "lm") +
-  facet_grid(ftreatment ~ replicate)
 ```
