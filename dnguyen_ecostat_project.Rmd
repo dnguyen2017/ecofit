@@ -509,7 +509,7 @@ sims_vary_noise <- lapply(1:nrow(init_df), function(x)
 
 sims_vary_noise %>%
   ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate),, col = "red", alpha = 0.5) +
+  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
   #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
   facet_wrap(~ftreatment)
 ```
@@ -531,7 +531,7 @@ sims_vary_a <- lapply(1:nrow(init_df), function(x)
 
 sims_vary_a %>%
   ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate),, col = "red", alpha = 0.5) +
+  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
   #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
   facet_wrap(~ftreatment)
 ```
@@ -553,10 +553,36 @@ sims_vary_b <- lapply(1:nrow(init_df), function(x)
 
 sims_vary_b %>%
   ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate),, col = "red", alpha = 0.5) +
+  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
   #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
   facet_wrap(~ftreatment)
 ```
+
+```{r}
+sens_par <- crossing(init = log(100),
+       a = c(0.9, 1, 1.1),
+       b = c(-0.75, - 0.25, 0.25, 0.75),
+       sd = unlist(init_df[1,"trt_resid"]))
+
+sims_sens <- lapply(1:nrow(sens_par), function(x)
+  sim_log_gomp(xinit = unlist(sens_par[x, "init"]),
+             lambda = unlist(sens_par[x, "a"]), 
+             b = unlist(sens_par[x,"b"]), 
+             sd_proc = unlist(sens_par[1,"sd"]), 
+             tfinal = 100, 
+             nsim = 5,
+             replicate = 1,
+             ftreatment = 1)
+  ) %>%
+  bind_rows()
+
+sims_sens %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = sim), col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_grid(lambda~b_)
+```
+
 
 ```{r acf, eval = FALSE}
 # need to write code to extract lag(1) acf
