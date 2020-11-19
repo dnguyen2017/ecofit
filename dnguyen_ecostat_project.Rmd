@@ -12,8 +12,8 @@ bibliography: nres803.bib
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(readxl)
-library(lme4)
 library(broom.mixed)
+library(nlme)
 ```
 
 ```{r munge_data, include = FALSE}
@@ -118,10 +118,48 @@ weevil <-
          l_next_total = log(next_total + 1),
          r = log((next_total + 1)/(total + 1)),
          ftreatment = factor(treatment, levels = c("0", "0.05", "0.1", "0.15")),
+         freplicate = factor(replicate, levels = as.character(1:10)),
          time = (days - 32)/4) %>%
   unite(c("ftreatment", "replicate"), col = "rep_trt", remove = FALSE)
 ```
 
+```{r define_sim_gomp}
+sim_log_gomp <- function (xinit,     # initial log population size
+                     lambda, # population growth rate,
+                     b,      # density dependence
+                     sd_proc, # process noise: N(0, sd_proc)
+                     tfinal,
+                     nsim,
+                     replicate,
+                     ftreatment) {
+  
+  # init storage list for all simulation
+  sim_list <- vector("list", length = nsim)
+  
+  for (i in seq_along(sim_list)) {
+    # init storage for current simulation
+    log_x <- vector("numeric", length = tfinal)
+    log_x[1] <- xinit
+    
+    # sim population dynamics
+    for (j in 2:tfinal) {
+      proc_error <- rnorm(n = 1, mean = 0, sd = sd_proc)
+      log_x[j] <- lambda + b * log_x[j-1] + proc_error
+    }
+    # save current simulation
+    sim_list[[i]] <- (tidyr::tibble(time = 1:tfinal,
+                                    log_x = log_x,
+                                    N = exp(log_x),
+                                    lambda = lambda,
+                                    b_ = b,
+                                    sd_proc = sd_proc,
+                                    replicate = replicate,
+                                    ftreatment = ftreatment))
+  } 
+  out <- dplyr::bind_rows(sim_list, .id = "sim")
+  return(out)
+}
+```
 
 # Introduction
 
@@ -212,11 +250,9 @@ weevil %>%
 
 # Results
 
-### Model fitting
+### Model comparison
 
-```{r fit_nlme}
-library(nlme)
-
+```{r fit_nlme, eval = FALSE}
 # 1. homogenerous variance model
 # this is just lm() since I haven't specificed weights
 pop_gls_none <- gls(l_next_total ~ l_total*ftreatment - 1, 
@@ -225,7 +261,7 @@ pop_gls_none <- gls(l_next_total ~ l_total*ftreatment - 1,
     na.action=na.omit) # ignore na values
 
 # 2. treatment specific residual model
-pop_gls_trt <- gls(l_next_total ~ l_total*ftreatment -1, 
+m3 <- gls(l_next_total ~ l_total*ftreatment -1, 
     data = weevil, 
     weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
     method = "ML",
@@ -239,7 +275,7 @@ pop_lme_trt <- lme(l_next_total ~ l_total*ftreatment - 1,
     method = "ML",
     na.action=na.omit) # ignore na values
 
-AIC(pop_gls_none, pop_gls_trt, pop_lme_trt) %>%
+AIC(pop_gls_none, m3, pop_lme_trt) %>%
   mutate(delta = AIC - min(AIC),
          weight = exp(-delta/2),
          weight = weight/sum(weight)) %>%
@@ -249,9 +285,9 @@ AIC(pop_gls_none, pop_gls_trt, pop_lme_trt) %>%
 
 # get treatment specific sd of residuals
 # trt_resid is the sd of the residual
-# std_resid is the ratio of group-specific sd that is reported by summary(pop_gls_trt)
+# std_resid is the ratio of group-specific sd that is reported by summary(m3)
 var_est_trt <-
-  augment(pop_gls_trt) %>%
+  augment(m3) %>%
   group_by(ftreatment) %>%
   mutate(trt_resid = sd(.resid)) %>%
   slice(1) %>%
@@ -270,47 +306,143 @@ augment(pop_lme_trt) %>%
 
 ```
 
-# simulations with estimated parameters
+```{r fit_models}
+# treatment specific growth rate and density dependnece
+# homogenous variance
+m1 <- gls(l_next_total ~ l_total*ftreatment - 1, 
+    data = weevil, 
+    method = "ML",
+    na.action=na.omit)
+
+# common growth rate and density dependnece
+# treatment specific variance
+m2 <- 
+  gls(l_next_total ~ l_total - 1, 
+    data = weevil, 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit)
+
+# treatment specific growth rate and density dependnece
+# treatment specific variance
+m3 <- 
+  gls(l_next_total ~ l_total*ftreatment -1, 
+    data = weevil, 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit)
+
+# treatment specific growth rate and density dependnece
+# treatment specific variance
+# random intercept of rep:trt (which is replicate nested in treatment)
+m4 <- lme(l_next_total ~ l_total*ftreatment - 1, 
+    random = ~ 1 | rep_trt,
+    data = weevil, 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit) # ignore na values
+
+# treatment specific growth rate and density dependnece
+# treatment specific variance
+# random intercept and slope of rep:trt (which is replicate nested in treatment
+m5 <- lme(l_next_total ~ l_total*ftreatment - 1, 
+    random = ~ 1 + ftreatment| rep_trt,
+    data = weevil, 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit) # ignore na values
+```
+
+```{r eval = FALSE}
+m3_drop8 <- 
+  gls(l_next_total ~ l_total*ftreatment -1, 
+    data = weevil %>% filter(!(ftreatment == 0.15 & replicate == 8)), 
+    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    method = "ML",
+    na.action=na.omit)
+
+summary(m3_drop8)
+```
+
+
+```{r aic_table}
+AIC(m1, m2, m3, m4) %>%
+  mutate(delta = AIC - min(AIC),
+         weight = exp(-delta/2),
+         weight = weight/sum(weight)) %>%
+  add_column(model = c("model 1", "model 2", "model 3", "model 4")) %>%
+  select(model, df, AIC, delta, weight) %>%
+  knitr::kable(digits = 3)
+```
+
+```{r AIC_5}
+AIC(m1, m2, m3, m4, m5) %>%
+  mutate(delta = AIC - min(AIC),
+         weight = exp(-delta/2),
+         weight = weight/sum(weight)) %>%
+  add_column(model = c("model 1", "model 2", "model 3", "model 4", "model 5")) %>%
+  select(model, df, AIC, delta, weight) %>%
+  knitr::kable(digits = 3)
+```
 
 ```{r}
-sim_log_gomp <- function (xinit,     # initial log population size
-                     lambda, # population growth rate,
-                     b,      # density dependence
-                     sd_proc, # process noise: N(0, sd_proc)
-                     tfinal,
-                     nsim,
-                     replicate,
-                     ftreatment) {
+# get coef from m4
+coef(m4) %>%
+  as_tibble(rownames = "treatment_replicate") %>%
+  separate(treatment_replicate, sep = "_", into = c("treatment", "replicate")) %>%
+  rename(3:11)
+```
+
+
+```{r}
+m3_aug <- 
+  augment(m3, weevil) %>%
+  rename(residuals = .resid, fitted = .fitted)
+
+# try to calculate factor-specific residual SE
+df_m3 <- 12 # residual df (I think??? Not sure how this works with factor specific var) 
+
+m3_aug %>%
+  group_by(ftreatment) %>%
+  mutate(sd_resid = sd(residuals), # directly calculate sd
+         sq_resid = sum(residuals^2),
+         nobs = n()) %>%
+  mutate(se_resid = sqrt(sq_resid/ (nobs - df_m3))) %>% # calculate sqrt(SSE/df_error)
+  summarize(sd_resid, se_resid) %>%  
+  slice(1) # they are almost the same thing?
   
-  # init storage list for all simulation
-  sim_list <- vector("list", length = nsim)
-  
-  for (i in seq_along(sim_list)) {
-    # init storage for current simulation
-    log_x <- vector("numeric", length = tfinal)
-    log_x[1] <- xinit
-    
-    # sim population dynamics
-    for (j in 2:tfinal) {
-      proc_error <- rnorm(n = 1, mean = 0, sd = sd_proc)
-      log_x[j] <- lambda + b * log_x[j-1] + proc_error
-    }
-    # save current simulation
-    sim_list[[i]] <- (tidyr::tibble(time = 1:tfinal,
-                                    log_x = log_x,
-                                    N = exp(log_x),
-                                    lambda = lambda,
-                                    b_ = b,
-                                    sd_proc = sd_proc,
-                                    replicate = replicate,
-                                    ftreatment = ftreatment))
-  } 
-  out <- dplyr::bind_rows(sim_list, .id = "sim")
-  return(out)
-}
+```
+
+```{r confidence_int}
+m3_int <- intervals(m3)
+m3_int$coef %>%
+  as_tibble(rownames = "coefficient") %>%
+  mutate(parameter = case_when(str_detect(coefficient, "l_total") ~ "b",
+                                 str_detect(coefficient, "ftreatment") ~ "a",
+                                 TRUE ~ coefficient)) %>%
+  mutate(treatment = str_remove_all(coefficient, "[[:alpha:]|:|_]"), # keep only numbers and decimal point
+         treatment = ifelse(treatment == "", "0", treatment),
+         treatment = factor(treatment, levels = c("0", "0.05","0.1","0.15"))) %>%
+  mutate(`estimate (95 % CI)` = paste(round(est.,3), " (", round(lower,3), ", ", round(upper,3), ")"))
+```
+
+
+```{r get_parms}
+# get treatment specific sd of residuals
+# trt_resid is the sd of the residual
+# std_resid is the ratio of group-specific sd that is reported by summary(pop_gls_trt)
+var_est_trt <-
+  augment(m3) %>%
+  group_by(ftreatment) %>%
+  mutate(trt_resid = sd(.resid)) %>%
+  slice(1) %>%
+  ungroup() %>%
+  mutate(std_resid = trt_resid/min(trt_resid)) %>%
+  summarize(trt_resid, std_resid) %>%
+  add_column(ftreatment = as.factor(c(0, 0.05, 0.1, 0.15)) )
 
 # extract parameter estimates from top model
-parm_est <- tidy(pop_gls_trt) %>% add_column(ftreatment = as.factor(c(0,0,0.05,0.1,0.15,0.05,0.1,0.15)),
+parm_est <- tidy(m3) %>% add_column(ftreatment = as.factor(c(0,0,0.05,0.1,0.15,0.05,0.1,0.15)),
                                  parameter = c(c("b","a"),c("a","a","a"),c("b","b","b")) ) %>%
   select(parameter, ftreatment, estimate) %>%
   pivot_wider(names_from = parameter, values_from = estimate)
@@ -334,6 +466,9 @@ init_df <- inner_join(init_pop, parm_est)
 ```
 
 
+# simulations with estimated parameters
+
+
 ```{r}
 sims <- lapply(1:nrow(init_df), function(x)
   sim_log_gomp(xinit = unlist(init_df[x, "l_total"]), 
@@ -341,7 +476,7 @@ sims <- lapply(1:nrow(init_df), function(x)
              b = unlist(init_df[x,"b"]), 
              sd_proc = unlist(init_df[x,"trt_resid"]), 
              tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 10,
+             nsim = 5,
              replicate = unlist(init_df[x,"replicate"]),
              ftreatment = unlist(init_df[x,"ftreatment"]))
   ) %>%
@@ -392,7 +527,7 @@ acf1$acf[2]
 
 
 ```{r}
-augment(pop_gls_trt) %>%
+augment(m3) %>%
   rename(fitted = .fitted, residuals= .resid) %>%
   group_by(ftreatment) %>%
   mutate(var_resid = var(residuals),
@@ -411,12 +546,8 @@ augment(pop_gls_trt) %>%
 
 ### Model diagnostics
 
-```{r pop_gls_trt_resids, message=FALSE, warning = FALSE}
-aug_gls_trt <- 
-  augment(pop_gls_trt, weevil) %>%
-  rename(residuals = .resid, fitted = .fitted)
-
-aug_gls_trt %>%
+```{r m3_resids, message=FALSE, warning = FALSE}
+m3_aug %>%
   filter(ftreatment == 0) %>%
   ggplot(aes(x = fitted, y = residuals)) +
   geom_point() + 
@@ -426,7 +557,7 @@ aug_gls_trt %>%
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "0 % shell")
 
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0.05) %>%
   ggplot(aes(x = fitted, y = residuals)) +
   geom_point() + 
@@ -436,7 +567,7 @@ aug_gls_trt %>%
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "5 % shell")
 
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0.1) %>%
   ggplot(aes(x = fitted, y = residuals)) +
   geom_point() + 
@@ -446,7 +577,7 @@ aug_gls_trt %>%
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "10 % shell")
 
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0.15) %>%
   ggplot(aes(x = fitted, y = residuals)) +
   geom_point() + 
@@ -462,12 +593,12 @@ Plots of residuals vs. expected values look good for the one-step-ahead model.
 Are the variances homogeneous across treatments?
 
 ```{r}
-aug_gls_trt %>%
+m3_aug %>%
   ggplot(aes(x = ftreatment, y = residuals)) +
   geom_boxplot() +
   geom_jitter(alpha = 0.2) 
 
-aug_gls_trt %>%
+m3_aug %>%
   ggplot(aes(x = rep_trt, y = residuals)) +
   geom_boxplot() +
   geom_jitter(aes(col = ftreatment, shape = ftreatment),alpha = 0.4)  +
@@ -477,7 +608,7 @@ aug_gls_trt %>%
        col = "treatment", shape = "treatment",
        x = "treatment x replicate")
 
-aug_gls_trt %>%
+m3_aug %>%
   group_by(ftreatment) %>%
   mutate(resid_var = var(residuals)) %>%
   slice(1) %>%
@@ -497,7 +628,7 @@ aug_gls_trt %>%
 But is there any autocorrelation in residuals? Lets look visually first, then check using ACF or Ljung-Box tests.
 
 ```{r}
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0) %>%
   ggplot(aes(x = days, y = residuals)) +
   geom_point() + 
@@ -507,7 +638,7 @@ aug_gls_trt %>%
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "0 % shell")
 
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0.05) %>%
   ggplot(aes(x = days, y = residuals)) +
   geom_point() + 
@@ -517,7 +648,7 @@ aug_gls_trt %>%
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "5 % shell")
 
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0.1) %>%
   ggplot(aes(x = days, y = residuals)) +
   geom_point() + 
@@ -527,7 +658,7 @@ aug_gls_trt %>%
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "10 % shell")
 
-aug_gls_trt %>%
+m3_aug %>%
   filter(ftreatment == 0.15) %>%
   ggplot(aes(x = days, y = residuals)) +
   geom_point() + 
