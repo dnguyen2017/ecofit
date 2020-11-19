@@ -419,6 +419,47 @@ init_pop <-
 init_df <- inner_join(init_pop, parm_est)
 ```
 
+```{r calc_K}
+nobs <- weevil %>% filter(!is.na(l_total),!is.na(l_next_total)) %>% group_by(treatment) %>% summarize(nobs = n()) %>% 
+  rename(ftreatment = treatment) %>% mutate(ftreatment = as.factor(ftreatment))
+
+K_m3 <- parm_est %>% inner_join(nobs) %>% inner_join(var_est_trt) %>%
+  # compute mean and var of log-population and 95 % CI
+  mutate(mean_logK = a/(1-b),
+         trt_var = trt_resid^2,
+         var_logK = trt_var/(1-b),
+         upr_logK = mean_logK + 2*sqrt(var_logK),
+         lwr_logK = mean_logK - 2*sqrt(var_logK),
+         mean_logK_lwr = mean_logK - 1.96*sqrt(var_logK/nobs),
+         mean_logK_upr = mean_logK + 1.96*sqrt(var_logK/nobs)) %>%
+  # compute mean and var of original scale population         
+  mutate(log_mean_K = mean_logK + var_logK/2,
+         mean_K = exp(log_mean_K),
+         median_k = exp(mean_logK)) %>%
+  # compute 95 % CI
+  mutate(se_K = sqrt(trt_var/nobs + (trt_var^2 / 2* (nobs - 1)) ), # cox's method
+         log_mean_K_lwr = log_mean_K - 1.96 * se_K,
+         mean_K_lwr = exp(log_mean_K_lwr),
+         log_mean_K_upr = log_mean_K + 1.96 * se_K,
+         mean_K_upr = exp(log_mean_K_upr))
+
+K_m3 %>%
+  ggplot(aes(x = ftreatment)) +
+  geom_point(aes(y = log_mean_K)) +
+  geom_errorbar(aes(ymin = log_mean_K_lwr, ymax = log_mean_K_upr))
+
+K_m3 %>%
+  ggplot(aes(x = ftreatment)) +
+  geom_point(aes(y = mean_logK), size = 2) +
+  geom_errorbar(aes(ymin = mean_logK_lwr, ymax = mean_logK_upr), width = 0.5) +
+  geom_errorbar(aes(ymin = lwr_logK, ymax = upr_logK), col = "red", width = 0) +
+  geom_hline(yintercept = log(1), linetype = 2, size = 1.5) +
+  labs(title = "Estimated log carrying capacity",
+       caption = "red lines denote E(K) +/- 2sd(K)\nhorizontal dashed line is extinction threshold (ln(1))",
+       x = "Percent peanut shell",
+       y = "Log Carrying capacity (95 % CI)")
+```
+
 
 # simulations with estimated parameters
 
@@ -626,6 +667,11 @@ m3_aug %>%
 # References {-}
 
 <div id="refs"></div>
+
+```{r}
+knitr::knit_exit()
+```
+
 
 # More plots
 
