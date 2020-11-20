@@ -183,6 +183,7 @@ The models will be compared by AIC and goodness of fit will be assessed by compa
 
 ```{r plot_all}
 full_df %>%
+  filter(treatment != 0.03) %>%
   ggplot(aes(x = days, y = total, group = replicate, col = as.factor(replicate) )) +
   geom_line() + 
   facet_wrap(~treatment) +
@@ -570,6 +571,10 @@ log_mean_init <-
          init = log(init)) %>%
   slice(1) %>% pull(init)
 
+mean_log_weevil <- weevil %>% group_by(ftreatment, freplicate) %>%
+  mutate(l_total = ifelse(is.na(l_total), log(1), l_total)) %>%
+  summarise(mean_l_total = mean(l_total, na.rm = TRUE))
+
 K_m3 %>%
   ggplot(aes(x = ftreatment)) +
   geom_point(aes(y = mean_logK), size = 2) +
@@ -577,10 +582,13 @@ K_m3 %>%
   geom_errorbar(aes(ymin = lwr_logK, ymax = upr_logK), col = "red", width = 0) +
   geom_hline(yintercept = log(1), linetype = 2, size = 1.5) +
   geom_hline(yintercept = log_mean_init, size = 1.5) +
+  geom_jitter(data = mean_log_weevil, mapping = aes(y = mean_l_total, col = freplicate),size = 2, alpha = 0.5) +
   labs(title = "Estimated log carrying capacity",
+       subtitle = "colored points are means of ln(N + 1) over total duration of experiment",
        caption = "red lines denote E(K) +/- 2sd(K)\ndashed line is extinction threshold (ln(1))\nsolid line is log of mean initial population",
        x = "Percent peanut shell",
-       y = "Log Carrying capacity (95 % CI)")
+       y = "Log Carrying capacity (95 % CI)") +
+  theme(legend.position = "n")
 ```
 
 
