@@ -236,21 +236,6 @@ Assessing the goodness of fit for noisy populations is challenging because sensi
 <!-- * Use ar(1) and extinction time as statistical summaries -->
 <!-- * maybe use rolling mean and variance too? -->
 
-```{r plot_obs_extinction_time, eval = FALSE}
-weevil %>%
-  group_by(treatment, replicate) %>%
-  slice(1) %>%
-  summarise(last_day) %>%
-  group_by(treatment) %>%
-  mutate(mean_time = mean(last_day, na.rm = TRUE),
-         treatment = as.factor(treatment)) %>%
-  ggplot() +
-  geom_histogram(aes(x = last_day, group = treatment)) +
-  geom_vline(aes(xintercept = mean_time, group = treatment), size = 1.5, linetype = 2) +
-  facet_wrap(~treatment) +
-  labs(title = "Distribution of observed extinction times")
-```
-
 # Results
 
 ### Model comparison
@@ -546,19 +531,18 @@ sims_small %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
 ```
 
 ```{r compute_95PI, cache = TRUE}
+nsims <- 200
 sims <- lapply(1:nrow(init_df), function(x)
   sim_log_gomp(xinit = unlist(init_df[x, "l_total"]), 
              lambda = unlist(init_df[x, "a"]), 
              b = unlist(init_df[x,"b"]), 
              sd_proc = unlist(init_df[x,"trt_resid"]), 
              tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 200,
+             nsim = nsims,
              replicate = unlist(init_df[x,"replicate"]),
              ftreatment = unlist(init_df[x,"ftreatment"]))
   ) %>%
-  bind_rows()
-
-sims <- sims %>% mutate(N = N - 1)
+  bind_rows(.id = "id") %>% mutate(N = N - 1)
 
 # calculate 95 % prediction intervals
 # average over replicate and simulation (don't group by it)
@@ -580,6 +564,91 @@ sim_interval %>%
   geom_line(data = weevil, mapping = aes(x = days - 32, # backshift by days spent initializing population
                                          y = total, group = replicate), alpha = 0.5) +
   facet_wrap(~ftreatment)
+```
+
+```{r obs_extinction_time}
+# get mean time to extinction and proportion of populations that went extinct
+obs_ext_df <- weevil %>%
+  group_by(treatment, replicate) %>%
+  slice(1) %>%
+  summarise(last_day) %>%
+  group_by(treatment) %>%
+  mutate(mean_time = mean(last_day, na.rm = TRUE),
+         prop_extinct = sum(!is.na(last_day))/n(),
+         ftreatment = as.factor(treatment)) %>%
+  select(-treatment)
+
+# ggplot() +
+#   geom_histogram(data = obs_ext_df, mapping = aes(x = last_day)) +
+#   geom_vline(data = obs_ext_df, mapping = aes(xintercept = mean_time), size = 1.5, linetype = 2) +
+#   facet_wrap(~ftreatment) +
+#   labs(title = "Distribution of observed extinction times")
+```
+
+```{r}
+# ext_df <- 
+#   sims %>% unite("sim_id", id, sim) %>%
+#   group_by(ftreatment, sim_id, replicate) %>%
+#   mutate(zeros = cumsum(N <= 0)) %>%
+#   group_by(sim_id) %>%
+#   mutate(went_extinct = sum(zeros > 0)) %>%
+#   summarize(extinction_day = ifelse(zeros == 1, time*4 - 3, NA),
+#             went_extinct) %>%
+#   select(extinction_day, went_extinct) %>%
+#   slice(1)
+
+ext_df <- sims %>% unite("sim_id", id, sim) %>%
+  group_by(ftreatment, sim_id) %>%
+  mutate(zeros = cumsum(N <= 0)) %>%
+  mutate(extinction_time = ifelse(zeros == 1, time, NA),
+         extinction_time = min(extinction_time, na.rm = TRUE),
+         extinction_time = ifelse(extinction_time == Inf, NA, extinction_time),
+         extinction_time = extinction_time * 4 - 3)
+
+ext_mean_df <- ext_df %>%
+  group_by(ftreatment) %>%
+  summarize(mean_extinction_day = mean(extinction_time, na.rm = TRUE))
+            # num_extinct = n(!is.na(extinction_day)),
+            # prop_extinct = num_extinct / nsims)
+
+ggplot() +
+  geom_density(data = ext_df, mapping = aes(x = extinction_time), fill = "red", alpha = 0.5, adjust = 3, col = "red") +  
+  geom_density(data = obs_ext_df, mapping = aes(x = last_day), fill = "blue", alpha = 0.5, col = "blue") +
+  geom_rug(data = obs_ext_df, mapping = aes(x = last_day), col = "blue") +
+  geom_vline(data = ext_mean_df, mapping = aes(xintercept = mean_extinction_day), size = 1.5, col = "red") +
+  geom_vline(data = obs_ext_df, mapping = aes(xintercept = mean_time), size = 1.5, col = "blue") +
+  facet_wrap(~ftreatment) +
+  labs(title = "Distribution of predicted and observed extinction times")
+```
+
+```{r}
+# calc number of runs for each treatment
+sims_per_trt <- nsims * 10
+# get the proportion of runs that went extinct per treatment
+pred_prop_ext <- sims %>% unite("sim_id", id, sim) %>%
+  group_by(sim_id) %>%
+  mutate(zeros = sum(N <= 0) > 0) %>%
+  slice(1) %>%
+  group_by(ftreatment) %>%
+  summarize(went_extinct = sum(zeros),
+            prop_extinct = went_extinct / sims_per_trt) %>%
+  select(treatment = ftreatment, `pred. prop. extinct` = prop_extinct)
+# get the mean time to extinction
+pred_MTE <- 
+  ext_mean_df %>%
+  rename(treatment = ftreatment, `pred. MTE` = mean_extinction_day)
+# combine predicted MTE and prop extinct
+pred_ext_summary <- full_join(pred_MTE, pred_prop_ext)
+
+# format observed time to extinction
+obs_ext_summary <- obs_ext_df %>% group_by(ftreatment) %>% slice(1) %>%
+  select(treatment = ftreatment, "obs. MTE" = mean_time, "obs. prop. extinct" = prop_extinct)
+
+# combine and report table
+options(knitr.kable.NA = '-')
+full_join(pred_ext_summary, obs_ext_summary) %>%
+  select(1,2,4,3,5) %>%
+  knitr::kable()
 ```
 
 
