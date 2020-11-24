@@ -427,7 +427,7 @@ m3_int_table %>%
   facet_wrap(~parameter) +
   labs(title = "Parameter estimates for model 3: treatment specific variance",
        y = "Estimate (95 % CI)",
-       x = "treatment (percent peanut shell)")
+       x = "treatment (proportion peanut shell)")
 
 ```
 
@@ -507,7 +507,7 @@ K_m3 %>%
   labs(title = "Estimated log carrying capacity",
        subtitle = "colored points are means of ln(N + 1) over total duration of experiment",
        caption = "red lines denote 95 % PI\ndashed line is extinction threshold (ln(1))\nsolid line is log of mean initial population",
-       x = "Percent peanut shell",
+       x = "proportion peanut shell",
        y = "Log Carrying capacity (95 % CI)") +
   theme(legend.position = "n")
 ```
