@@ -492,7 +492,11 @@ log_mean_init <-
          init = log(init)) %>%
   slice(1) %>% pull(init)
 
+# compute mean log(n + 1) for each population
+# would expect value for cycling pops to be biased high
 mean_log_weevil <- weevil %>% group_by(ftreatment, freplicate) %>%
+  # mutate(last_day = ifelse(is.na(last_day), Inf, last_day)) %>%
+  # filter(days <= last_day) %>%
   mutate(l_total = ifelse(is.na(l_total), log(1), l_total)) %>%
   summarise(mean_l_total = mean(l_total, na.rm = TRUE))
 
@@ -528,6 +532,8 @@ sims_small <- lapply(1:nrow(init_df), function(x)
   ) %>%
   bind_rows()
 
+sims_small <- sims_small %>% mutate(N = N - 1) # correct for log(n + 1) transformation
+
 sims_small %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
   ggplot() +
   geom_line(aes(x = time*4 - 3, y = N, group = rep_sim), col = "red", alpha = 0.5) +
@@ -552,15 +558,17 @@ sims <- lapply(1:nrow(init_df), function(x)
   ) %>%
   bind_rows()
 
+sims <- sims %>% mutate(N = N - 1)
+
 # calculate 95 % prediction intervals
 # average over replicate and simulation (don't group by it)
 sim_interval <- sims %>% 
   mutate(time = time*4 - 3) %>% # transform to daily scale
   group_by(ftreatment, time) %>%
-  summarise(mean_N = mean(N + 1),
-            p50 = median(N + 1),
-            p5 = quantile(N + 1, 0.05),
-            p95 = quantile(N + 1, 0.95))
+  summarise(mean_N = mean(N),
+            p50 = median(N),
+            p5 = quantile(N, 0.05),
+            p95 = quantile(N, 0.95))
 ```
 
 ```{r trajectory_plot_interval}
