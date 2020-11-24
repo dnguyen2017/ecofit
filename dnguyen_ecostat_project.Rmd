@@ -351,19 +351,20 @@ coef(m4) %>%
 ```
 
 
-```{r eval = FALSE}
+```{r get_m3_trt_sd}
 # try to calculate factor-specific residual SE
 df_m3 <- 12 # residual df (I think??? Not sure how this works with factor specific var) 
 
-m3_aug %>%
+var_est_trt <- m3_aug %>%
   group_by(ftreatment) %>%
-  mutate(sd_resid = sd(residuals), # directly calculate sd
+  mutate(sd_resid = sd(residuals), # directly calculate sd ### this is wrong!!!!
          sq_resid = sum(residuals^2),
          nobs = n()) %>%
+  # this is the correct sd!
   mutate(se_resid = sqrt(sq_resid/ (nobs - df_m3))) %>% # calculate sqrt(SSE/df_error)
   summarize(sd_resid, se_resid) %>%  
-  slice(1) # they are almost the same thing?
-  
+  slice(1) %>%
+  select(ftreatment, trt_resid = se_resid)
 ```
 
 
@@ -407,19 +408,6 @@ m3_int %>%
 ```
 
 ```{r get_parms}
-# get treatment specific sd of residuals
-# trt_resid is the sd of the residual
-# std_resid is the ratio of group-specific sd that is reported by summary(pop_gls_trt)
-var_est_trt <-
-  augment(m3) %>%
-  group_by(ftreatment) %>%
-  mutate(trt_resid = sd(.resid)) %>%
-  slice(1) %>%
-  ungroup() %>%
-  mutate(std_resid = trt_resid/min(trt_resid)) %>%
-  summarize(trt_resid, std_resid) %>%
-  add_column(ftreatment = as.factor(c(0, 0.05, 0.1, 0.15)) )
-
 # extract parameter estimates from top model
 parm_est <- tidy(m3) %>% add_column(ftreatment = as.factor(c(0,0,0.05,0.1,0.15,0.05,0.1,0.15)),
                                  parameter = c(c("b","a"),c("a","a","a"),c("b","b","b")) ) %>%
