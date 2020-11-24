@@ -181,7 +181,7 @@ The models will be compared by AIC and goodness of fit will be assessed by compa
 
 ### Bean weevil population data
 
-```{r plot_all}
+```{r plot_all, eval = FALSE}
 full_df %>%
   filter(treatment != 0.03) %>%
   ggplot(aes(x = days, y = total, group = replicate, col = as.factor(replicate) )) +
@@ -236,7 +236,7 @@ Assessing the goodness of fit for noisy populations is challenging because sensi
 <!-- * Use ar(1) and extinction time as statistical summaries -->
 <!-- * maybe use rolling mean and variance too? -->
 
-```{r plot_obs_extinction_time}
+```{r plot_obs_extinction_time, eval = FALSE}
 weevil %>%
   group_by(treatment, replicate) %>%
   slice(1) %>%
@@ -501,7 +501,6 @@ K_m3 %>%
 
 
 # simulations with estimated parameters
-
 
 ```{r}
 sims <- lapply(1:nrow(init_df), function(x)
