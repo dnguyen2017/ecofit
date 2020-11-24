@@ -321,7 +321,8 @@ AIC(m1, m2, m3, m4) %>%
          weight = exp(-delta/2),
          weight = weight/sum(weight)) %>%
   add_column(model = c("model 1", "model 2", "model 3", "model 4")) %>%
-  select(model, df, AIC, delta, weight) %>%
+  add_column(`log likelihood` = c(m1$logLik, m2$logLik, m3$logLik, m4$logLik)) %>%
+  select(model,`log likelihood`, df, AIC, delta, weight) %>%
   knitr::kable(digits = 3)
 ```
 
