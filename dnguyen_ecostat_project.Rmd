@@ -294,12 +294,13 @@ m4 <- lme(l_next_total ~ l_total*ftreatment - 1,
 # treatment specific growth rate and density dependnece
 # treatment specific variance
 # random intercept and slope of rep:trt (which is replicate nested in treatment
-m5 <- lme(l_next_total ~ l_total*ftreatment - 1, 
-    random = ~ 1 + ftreatment| rep_trt,
-    data = weevil, 
-    weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
-    method = "ML",
-    na.action=na.omit) # ignore na values
+# I'm not sure if this is specified correctly
+# m5 <- lme(l_next_total ~ l_total*ftreatment - 1, 
+    # random = ~ 1 + ftreatment| rep_trt,
+    # data = weevil, 
+    # weights = varIdent(form = ~1 | ftreatment), # factor specific residual variance
+    # method = "ML",
+    # na.action=na.omit) # ignore na values
 ```
 
 ```{r eval = FALSE}
@@ -324,7 +325,7 @@ AIC(m1, m2, m3, m4) %>%
   knitr::kable(digits = 3)
 ```
 
-```{r AIC_5}
+```{r AIC_5, eval = FALSE}
 AIC(m1, m2, m3, m4, m5) %>%
   mutate(delta = AIC - min(AIC),
          weight = exp(-delta/2),
@@ -334,7 +335,14 @@ AIC(m1, m2, m3, m4, m5) %>%
   knitr::kable(digits = 3)
 ```
 
-```{r}
+```{r augment_m3}
+m3_aug <- 
+  augment(m3, weevil) %>%
+  rename(residuals = .resid, fitted = .fitted)
+```
+
+
+```{r eval = FALSE}
 # get coef from m4
 coef(m4) %>%
   as_tibble(rownames = "treatment_replicate") %>%
@@ -342,11 +350,7 @@ coef(m4) %>%
 ```
 
 
-```{r}
-m3_aug <- 
-  augment(m3, weevil) %>%
-  rename(residuals = .resid, fitted = .fitted)
-
+```{r eval = FALSE}
 # try to calculate factor-specific residual SE
 df_m3 <- 12 # residual df (I think??? Not sure how this works with factor specific var) 
 
@@ -361,115 +365,18 @@ m3_aug %>%
   
 ```
 
-### Model diagnostics
 
-```{r}
-m3_aug %>%
-  ggplot(aes(x = fitted, y = residuals)) +
-  geom_jitter(aes(col = freplicate), alpha = 0.3, size = 2) +
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~ftreatment) +
-  labs(title = "Residual vs fitted plot: model 3") +
-  theme(legend.position = "n")
-
-m3_aug %>%
-  group_by(ftreatment) %>%
-  mutate(std_resid = residuals/sd(residuals),
-         sqrt_abs_resid = sqrt(abs(std_resid))) %>%
-  ggplot(aes(x = fitted, y = sqrt_abs_resid)) +
-  geom_point(aes(col = freplicate)) +
-  geom_smooth() +
-  geom_hline(yintercept = 0.822, linetype = 2) + facet_wrap(~ftreatment) +
-  labs(title = "Location-scale plot: model 3",
-      x = "Fitted",
-      y = "sqrt(abs(std.resid))",
-      col = "Treatment") +
-  theme(legend.position = "n")
-
-# qqline
-y <- quantile(m3$residuals, c(0.25, 0.75))
-x <- qnorm(c(0.25, 0.75))
-slope <- diff(y)/diff(x)
-int <- y[1L] - slope * x[1L]
-
-ggplot(m3_aug, aes(sample = residuals)) + stat_qq() + geom_abline(slope = slope, 
-    intercept = int) + facet_wrap(~ftreatment)
-
-
-m3_aug %>%
-  ggplot(aes(x = l_total, y = residuals, col = freplicate)) +
-  geom_jitter() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~ftreatment) +
-  labs(title = "residuals vs observed values",
-      x = "observed ln(abundance)",
-      col = "Treatment") +
-  theme(legend.position = "n")
-
-weevil %>%
-  ggplot(aes(x = l_total, y = r, col = freplicate)) +
-  geom_jitter() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~ftreatment) +
-  labs(title = "residuals vs observed values",
-      x = "observed ln(abundance)",
-      y = "population growth ln(N_t+1/N_t)",
-      col = "Treatment") +
-  theme(legend.position = "n")
-
-```
-
-```{r}
-m3_aug %>%
-  ggplot() +
-  geom_point(aes(x = l_total, y = l_next_total, col = freplicate), alpha = 0.5) +
-  geom_line(aes(x = l_total, y = fitted), size = 2) +
-  facet_wrap(~ftreatment) +
-  theme(legend.position = "n") +
-  labs(title = "Top model prediction",y = "Next log(abundance)",
-       x = "Current log(abundance)")
-```
-
-```{r }
-# can I get CI for gls plot?
-# adapt this code: http://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#glmmadmb
-nd <- expand_grid(l_total = seq(min(weevil$l_total, na.rm = T), max(weevil$l_total, na.rm = T), length.out = 100),
-            ftreatment = unique(weevil$ftreatment))
-
-## design matrix (fixed effects)
-mm <- model.matrix(delete.response(terms(m3)),nd)
-## calculate predicted values
-nd$l_next_total <- drop(mm %*% coef(m3))
-
-predvar <- diag(mm %*% vcov(m3) %*% t(mm))
-nd$SE <- sqrt(predvar)
-
-ggplot(weevil) +
-  geom_point(aes(x = l_total, y = l_next_total))
-
-nd %>%
-  ggplot() +
-  geom_line(aes(x = l_total, y = l_next_total), size = 1) +
-  geom_ribbon(aes(x = l_total, ymin = l_next_total - 2*SE, ymax = l_next_total + 2 * SE), alpha = 0.5) +
-  geom_point(data = weevil, mapping = aes(x = l_total, y = l_next_total, col = freplicate), alpha = 0.5) +
-  facet_wrap(~ftreatment) +
-  theme(legend.position = "n") +
-  labs(title = "Top model prediction",y = "Next log(abundance)",
-       x = "Current log(abundance)")
-
-```
-
-
-
-```{r}
+```{r eval = FALSE}
+# check for the largest jump in abundance
 weevil %>% group_by(ftreatment, freplicate) %>% mutate(difference = l_next_total - l_total, max_diff = max(difference, na.rm = TRUE)) %>% filter(difference == max_diff) %>%
   group_by(ftreatment) %>%
   filter(difference == max(max_diff)) 
 ```
 
+# Model 3 parameter estimates
 
 ```{r confidence_int}
+# get CI for a and b estimates of model 3
 m3_int <- intervals(m3)
 m3_int <- m3_int$coef %>%
   as_tibble(rownames = "coefficient") %>%
@@ -497,7 +404,6 @@ m3_int %>%
        y = "Estimate (95 % CI)",
        x = "treatment (percent peanut shell)")
 ```
-
 
 ```{r get_parms}
 # get treatment specific sd of residuals
@@ -536,6 +442,8 @@ init_pop <-
 # data frame with all initial value and parms for simulations
 init_df <- inner_join(init_pop, parm_est)
 ```
+
+# Predicted carrying capacity
 
 ```{r calc_K}
 nobs <- weevil %>% filter(!is.na(l_total),!is.na(l_next_total)) %>% group_by(treatment) %>% summarize(nobs = n()) %>% 
@@ -619,6 +527,115 @@ sims %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
 
+# References {-}
+
+<div id="refs"></div>
+
+# Appendix
+
+## Linear regression prediction plot
+
+```{r lin_reg_plot}
+# can I get CI for gls plot?
+# adapt this code: http://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#glmmadmb
+nd <- expand_grid(l_total = seq(min(weevil$l_total, na.rm = T), max(weevil$l_total, na.rm = T), length.out = 100),
+            ftreatment = unique(weevil$ftreatment))
+
+## design matrix (fixed effects)
+mm <- model.matrix(delete.response(terms(m3)),nd)
+## calculate predicted values
+nd$l_next_total <- drop(mm %*% coef(m3))
+
+predvar <- diag(mm %*% vcov(m3) %*% t(mm))
+nd$SE <- sqrt(predvar)
+
+# ggplot(weevil) +
+#   geom_point(aes(x = l_total, y = l_next_total))
+
+nd %>%
+  ggplot() +
+  geom_line(aes(x = l_total, y = l_next_total), size = 1) +
+  geom_ribbon(aes(x = l_total, ymin = l_next_total - 2*SE, ymax = l_next_total + 2 * SE), alpha = 0.5) +
+  geom_point(data = weevil, mapping = aes(x = l_total, y = l_next_total, col = freplicate), alpha = 0.5) +
+  facet_wrap(~ftreatment) +
+  theme(legend.position = "n") +
+  labs(title = "Top model prediction",y = "Next log(abundance)",
+       x = "Current log(abundance)")
+
+```
+
+```{r eval = FALSE}
+# prediction plot using fitted points from augment.gls
+m3_aug %>%
+  ggplot() +
+  geom_point(aes(x = l_total, y = l_next_total, col = freplicate), alpha = 0.5) +
+  geom_line(aes(x = l_total, y = fitted), size = 2) +
+  facet_wrap(~ftreatment) +
+  theme(legend.position = "n") +
+  labs(title = "Top model prediction",y = "Next log(abundance)",
+       x = "Current log(abundance)")
+```
+
+## Diagnostic plots for model 3
+
+```{r}
+m3_aug %>%
+  ggplot(aes(x = fitted, y = residuals)) +
+  geom_jitter(aes(col = freplicate), alpha = 0.3, size = 2) +
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~ftreatment) +
+  labs(title = "Residual vs fitted plot: model 3") +
+  theme(legend.position = "n")
+
+m3_aug %>%
+  group_by(ftreatment) %>%
+  mutate(std_resid = residuals/sd(residuals),
+         sqrt_abs_resid = sqrt(abs(std_resid))) %>%
+  ggplot(aes(x = fitted, y = sqrt_abs_resid)) +
+  geom_point(aes(col = freplicate)) +
+  geom_smooth() +
+  geom_hline(yintercept = 0.822, linetype = 2) + facet_wrap(~ftreatment) +
+  labs(title = "Location-scale plot: model 3",
+      x = "Fitted",
+      y = "sqrt(abs(std.resid))",
+      col = "Treatment") +
+  theme(legend.position = "n")
+
+# qqline
+y <- quantile(m3$residuals, c(0.25, 0.75))
+x <- qnorm(c(0.25, 0.75))
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+ggplot(m3_aug, aes(sample = residuals)) + stat_qq() + geom_abline(slope = slope, 
+    intercept = int) + facet_wrap(~ftreatment)
+
+
+m3_aug %>%
+  ggplot(aes(x = l_total, y = residuals, col = freplicate)) +
+  geom_jitter() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~ftreatment) +
+  labs(title = "residuals vs observed values",
+      x = "observed ln(abundance)",
+      col = "Treatment") +
+  theme(legend.position = "n")
+
+weevil %>%
+  ggplot(aes(x = l_total, y = r, col = freplicate)) +
+  geom_jitter() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~ftreatment) +
+  labs(title = "residuals vs observed values",
+      x = "observed ln(abundance)",
+      y = "population growth ln(N_t+1/N_t)",
+      col = "Treatment") +
+  theme(legend.position = "n")
+```
+
+## Population level prediction plots
+
 ```{r}
 filter(sims, ftreatment == 0) %>%
   ggplot() +
@@ -670,105 +687,12 @@ filter(sims, ftreatment == 0.15) %>%
 ```
 
 
-To examine the effect of treatment specific variance in isolation I simulate the gompertz model using the fixed effects estimates for the control and the environmental variance estimates for each treatment.
-
-```{r}
-sims_vary_noise <- lapply(1:nrow(init_df), function(x)
-  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
-             lambda = unlist(init_df[1, "a"]), 
-             b = unlist(init_df[1,"b"]), 
-             sd_proc = unlist(init_df[x,"trt_resid"]), 
-             tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 1,
-             replicate = unlist(init_df[x,"replicate"]),
-             ftreatment = unlist(init_df[x,"ftreatment"]))
-  ) %>%
-  bind_rows()
-
-sims_vary_noise %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_wrap(~ftreatment)
-```
-
-Hold all parameters at control but use factor specific population growth rate
-
-```{r}
-sims_vary_a <- lapply(1:nrow(init_df), function(x)
-  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
-             lambda = unlist(init_df[x, "a"]), 
-             b = unlist(init_df[1,"b"]), 
-             sd_proc = unlist(init_df[1,"trt_resid"]), 
-             tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 1,
-             replicate = unlist(init_df[x,"replicate"]),
-             ftreatment = unlist(init_df[x,"ftreatment"]))
-  ) %>%
-  bind_rows()
-
-sims_vary_a %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_wrap(~ftreatment)
-```
-
-Hold all parameters at control but use factor specific density dependence
-
-```{r}
-sims_vary_b <- lapply(1:nrow(init_df), function(x)
-  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
-             lambda = unlist(init_df[1, "a"]), 
-             b = unlist(init_df[x,"b"]), 
-             sd_proc = unlist(init_df[1,"trt_resid"]), 
-             tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 1,
-             replicate = unlist(init_df[x,"replicate"]),
-             ftreatment = unlist(init_df[x,"ftreatment"]))
-  ) %>%
-  bind_rows()
-
-sims_vary_b %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_wrap(~ftreatment)
-```
-
-```{r demo_possible_dynamics, eval = FALSE}
-sens_par <- crossing(init = log(100),
-       a = c(0.9, 1, 1.1),
-       b = c(-0.5, - 0.25, 0.25, 0.75),
-       sd = unlist(init_df[1,"trt_resid"]))
-
-sims_sens <- lapply(1:nrow(sens_par), function(x)
-  sim_log_gomp(xinit = unlist(sens_par[x, "init"]),
-             lambda = unlist(sens_par[x, "a"]), 
-             b = unlist(sens_par[x,"b"]), 
-             sd_proc = unlist(sens_par[1,"sd"]), 
-             tfinal = 100, 
-             nsim = 5,
-             replicate = 1,
-             ftreatment = 1)
-  ) %>%
-  bind_rows()
-
-sims_sens %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = sim), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_grid(lambda~b_, scales = "free")
-  #facet_wrap(~b_, scale = "free_y")
+```{r }
+knitr::knit_exit()
 ```
 
 
-```{r acf, eval = FALSE}
-# need to write code to extract lag(1) acf
-acf1 <- sims %>% filter(ftreatment == 0, replicate == 1, sim == 1) %>% pull(N) %>% acf(plot = FALSE, lag = 1)
-acf1$acf[2]
-```
-
+# Boxplot of residuals
 
 ```{r}
 augment(m3) %>%
@@ -787,16 +711,6 @@ augment(m3) %>%
        x = "treatment x replicate") +
   facet_wrap(~ftreatment)
 ```
-
-
-# References {-}
-
-<div id="refs"></div>
-
-```{r }
-knitr::knit_exit()
-```
-
 
 # More plots
 
@@ -989,4 +903,109 @@ m3_aug %>%
   facet_wrap(~replicate) +
   labs(title = "Residual plot for one-step-ahead model",
        subtitle = "15 % shell")
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+Trash heap below this point
+
+To examine the effect of treatment specific variance in isolation I simulate the gompertz model using the fixed effects estimates for the control and the environmental variance estimates for each treatment.
+
+```{r}
+sims_vary_noise <- lapply(1:nrow(init_df), function(x)
+  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
+             lambda = unlist(init_df[1, "a"]), 
+             b = unlist(init_df[1,"b"]), 
+             sd_proc = unlist(init_df[x,"trt_resid"]), 
+             tfinal = unlist(init_df[x,"tfinal"]), 
+             nsim = 1,
+             replicate = unlist(init_df[x,"replicate"]),
+             ftreatment = unlist(init_df[x,"ftreatment"]))
+  ) %>%
+  bind_rows()
+
+sims_vary_noise %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_wrap(~ftreatment)
+```
+
+Hold all parameters at control but use factor specific population growth rate
+
+```{r}
+sims_vary_a <- lapply(1:nrow(init_df), function(x)
+  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
+             lambda = unlist(init_df[x, "a"]), 
+             b = unlist(init_df[1,"b"]), 
+             sd_proc = unlist(init_df[1,"trt_resid"]), 
+             tfinal = unlist(init_df[x,"tfinal"]), 
+             nsim = 1,
+             replicate = unlist(init_df[x,"replicate"]),
+             ftreatment = unlist(init_df[x,"ftreatment"]))
+  ) %>%
+  bind_rows()
+
+sims_vary_a %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_wrap(~ftreatment)
+```
+
+Hold all parameters at control but use factor specific density dependence
+
+```{r}
+sims_vary_b <- lapply(1:nrow(init_df), function(x)
+  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
+             lambda = unlist(init_df[1, "a"]), 
+             b = unlist(init_df[x,"b"]), 
+             sd_proc = unlist(init_df[1,"trt_resid"]), 
+             tfinal = unlist(init_df[x,"tfinal"]), 
+             nsim = 1,
+             replicate = unlist(init_df[x,"replicate"]),
+             ftreatment = unlist(init_df[x,"ftreatment"]))
+  ) %>%
+  bind_rows()
+
+sims_vary_b %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_wrap(~ftreatment)
+```
+
+```{r demo_possible_dynamics, eval = FALSE}
+sens_par <- crossing(init = log(100),
+       a = c(0.9, 1, 1.1),
+       b = c(-0.5, - 0.25, 0.25, 0.75),
+       sd = unlist(init_df[1,"trt_resid"]))
+
+sims_sens <- lapply(1:nrow(sens_par), function(x)
+  sim_log_gomp(xinit = unlist(sens_par[x, "init"]),
+             lambda = unlist(sens_par[x, "a"]), 
+             b = unlist(sens_par[x,"b"]), 
+             sd_proc = unlist(sens_par[1,"sd"]), 
+             tfinal = 100, 
+             nsim = 5,
+             replicate = 1,
+             ftreatment = 1)
+  ) %>%
+  bind_rows()
+
+sims_sens %>%
+  ggplot() +
+  geom_line(aes(x = time*4, y = N, group = sim), col = "red", alpha = 0.5) +
+  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
+  facet_grid(lambda~b_, scales = "free")
+  #facet_wrap(~b_, scale = "free_y")
+```
+
+
+```{r acf, eval = FALSE}
+# need to write code to extract lag(1) acf
+acf1 <- sims %>% filter(ftreatment == 0, replicate == 1, sim == 1) %>% pull(N) %>% acf(plot = FALSE, lag = 1)
+acf1$acf[2]
 ```
