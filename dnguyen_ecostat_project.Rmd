@@ -380,7 +380,7 @@ weevil %>% group_by(ftreatment, freplicate) %>% mutate(difference = l_next_total
 ```{r confidence_int}
 # get CI for a and b estimates of model 3
 m3_int <- intervals(m3)
-m3_int <- m3_int$coef %>%
+m3_int_coef <- m3_int$coef %>%
   as_tibble(rownames = "coefficient") %>%
   mutate(parameter_sym = case_when(str_detect(coefficient, "l_total") ~ "b",
                                  str_detect(coefficient, "ftreatment") ~ "a",
@@ -390,14 +390,37 @@ m3_int <- m3_int$coef %>%
   mutate(treatment = str_remove_all(coefficient, "[[:alpha:]|:|_]"), # keep only numbers and decimal point
          treatment = ifelse(treatment == "", "0", treatment),
          treatment = factor(treatment, levels = c("0", "0.05","0.1","0.15"))) %>%
-  mutate(`estimate (95 % CI)` = paste(round(est.,3), " (", round(lower,3), ", ", round(upper,3), ")"))
+  mutate(`estimate (95 % CI)` = paste(round(est.,2), " (", round(lower,2), ", ", round(upper,2), ")"))
 
-m3_int %>% select(treatment, parameter, `estimate (95 % CI)`) %>%
+# get trt specific sd
+m3_int_sigma <- 
+  m3_int$sigma %>%
+  as_tibble(rownames = "estimate") %>%
+  pivot_wider(names_from = "estimate", values_from = "value") %>%
+  add_column(treatment = factor(0, levels = c("0", "0.05","0.1","0.15")))
+
+m3_int_varStruct <- 
+  m3_int$varStruct %>%
+  as_tibble(rownames = "treatment") %>%
+  mutate(treatment = factor(treatment, levels = c("0", "0.05","0.1","0.15")))
+
+m3_int_sd <-  bind_rows(m3_int_sigma, m3_int_varStruct) %>%
+  mutate(lower = ifelse(treatment != 0, lower*m3_int_sigma$lower, lower),
+         est. = ifelse(treatment != 0, est. * m3_int_sigma$est., est.),
+         upper = ifelse(treatment != 0, upper * m3_int_sigma$upper, upper)) %>%
+  mutate(`estimate (95 % CI)` = paste(round(est.,2), " (", round(lower,2), ", ", round(upper,2), ")")) %>%
+  mutate(parameter = "process noise (sd)")
+
+# combine coef and sd tibbles
+m3_int_table <- full_join(m3_int_coef, m3_int_sd)
+
+# table
+m3_int_table %>% select(treatment, parameter, `estimate (95 % CI)`) %>%
   pivot_wider(names_from = parameter, values_from = `estimate (95 % CI)`) %>%
-  select(1, 3, 2) %>%
   knitr::kable(caption = "Parameter estimates for model 3: treatment specific variance")
 
-m3_int %>%
+# plot
+m3_int_table %>%
   ggplot() +
   geom_point(aes(x = treatment, y = est.)) + 
   geom_errorbar(aes(x = treatment, ymin = lower, ymax = upper)) +
@@ -405,6 +428,7 @@ m3_int %>%
   labs(title = "Parameter estimates for model 3: treatment specific variance",
        y = "Estimate (95 % CI)",
        x = "treatment (percent peanut shell)")
+
 ```
 
 ```{r get_parms}
