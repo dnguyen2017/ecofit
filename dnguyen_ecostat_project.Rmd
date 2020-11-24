@@ -516,7 +516,7 @@ K_m3 %>%
 # simulations with estimated parameters
 
 ```{r}
-sims <- lapply(1:nrow(init_df), function(x)
+sims_small <- lapply(1:nrow(init_df), function(x)
   sim_log_gomp(xinit = unlist(init_df[x, "l_total"]), 
              lambda = unlist(init_df[x, "a"]), 
              b = unlist(init_df[x,"b"]), 
@@ -528,7 +528,7 @@ sims <- lapply(1:nrow(init_df), function(x)
   ) %>%
   bind_rows()
 
-sims %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
+sims_small %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
   ggplot() +
   geom_line(aes(x = time*4 - 3, y = N, group = rep_sim), col = "red", alpha = 0.5) +
   geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.7) +
@@ -538,6 +538,42 @@ sims %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
          x = "Days since beginning of treatment",
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
+
+```{r compute_95PI, cache = TRUE}
+sims <- lapply(1:nrow(init_df), function(x)
+  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]), 
+             lambda = unlist(init_df[x, "a"]), 
+             b = unlist(init_df[x,"b"]), 
+             sd_proc = unlist(init_df[x,"trt_resid"]), 
+             tfinal = unlist(init_df[x,"tfinal"]), 
+             nsim = 200,
+             replicate = unlist(init_df[x,"replicate"]),
+             ftreatment = unlist(init_df[x,"ftreatment"]))
+  ) %>%
+  bind_rows()
+
+# calculate 95 % prediction intervals
+# average over replicate and simulation (don't group by it)
+sim_interval <- sims %>% 
+  mutate(time = time*4 - 3) %>% # transform to daily scale
+  group_by(ftreatment, time) %>%
+  summarise(mean_N = mean(N + 1),
+            p50 = median(N + 1),
+            p5 = quantile(N + 1, 0.05),
+            p95 = quantile(N + 1, 0.95))
+```
+
+```{r trajectory_plot_interval}
+sim_interval %>%
+  ggplot() +
+  geom_ribbon(aes(x = time, ymin = p5, ymax = p95), alpha = 0.3, fill = "red") + 
+  geom_line(aes(x = time, y = mean_N), alpha = 0.5, size = 2) +
+  geom_line(aes(x = time, y = p50), size = 2, linetype = 2) +
+  geom_line(data = weevil, mapping = aes(x = days - 32, # backshift by days spent initializing population
+                                         y = total, group = replicate), alpha = 0.5) +
+  facet_wrap(~ftreatment)
+```
+
 
 # References {-}
 
@@ -649,37 +685,40 @@ weevil %>%
 ## Population level prediction plots
 
 ```{r}
-filter(sims, ftreatment == 0) %>%
+filter(sims_small, ftreatment == 0) %>%
   ggplot() +
   geom_line(aes(x = time*4, y = N, group = interaction(replicate,sim) ), col = "red", alpha = 0.5) +
   geom_line(data = filter(weevil, ftreatment == 0), mapping = aes(x = days - 32, y = total, group = replicate)) +
   facet_wrap(~replicate) +
    labs(title = "Gompertz model simulations with parameters from top model",
        y = "Abundance of adult bean weevil",
+       subtitle = "0 % peanut shell",
          x = "Days since beginning of treatment",
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 
 
 ```
 ```{r}
-filter(sims, ftreatment == 0.05) %>%
+filter(sims_small, ftreatment == 0.05) %>%
   ggplot() +
   geom_line(aes(x = time*4, y = N, group = interaction(replicate,sim) ), col = "red", alpha = 0.5) +
   geom_line(data = filter(weevil, ftreatment == 0.05), mapping = aes(x = days - 32, y = total, group = replicate)) +
   facet_wrap(~replicate) +
    labs(title = "Gompertz model simulations with parameters from top model",
+        subtitle = "5 % peanut shell",
        y = "Abundance of adult bean weevil",
          x = "Days since beginning of treatment",
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
 
 ```{r}
-filter(sims, ftreatment == 0.1) %>%
+filter(sims_small, ftreatment == 0.1) %>%
   ggplot() +
   geom_line(aes(x = time*4, y = N, group = interaction(replicate,sim) ), col = "red", alpha = 0.5) +
   geom_line(data = filter(weevil, ftreatment == 0.1), mapping = aes(x = days - 32, y = total, group = replicate)) +
   facet_wrap(~replicate) +
    labs(title = "Gompertz model simulations with parameters from top model",
+        subtitle = "10 % peanut shell",
        y = "Abundance of adult bean weevil",
          x = "Days since beginning of treatment",
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
@@ -687,13 +726,14 @@ filter(sims, ftreatment == 0.1) %>%
 ```
 
 ```{r}
-filter(sims, ftreatment == 0.15) %>%
+filter(sims_small, ftreatment == 0.15) %>%
   ggplot() +
   geom_line(aes(x = time*4, y = N, group = interaction(replicate,sim) ), col = "red", alpha = 0.5) +
   geom_line(data = filter(weevil, ftreatment == 0.15), mapping = aes(x = days - 32, y = total, group = replicate)) +
   facet_wrap(~replicate) +
    labs(title = "Gompertz model simulations with parameters from top model",
        y = "Abundance of adult bean weevil",
+       subtitle = "15 % peanut shell",
          x = "Days since beginning of treatment",
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
