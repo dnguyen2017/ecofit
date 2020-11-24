@@ -467,10 +467,10 @@ K_m3 <- parm_est %>% inner_join(nobs) %>% inner_join(var_est_trt) %>%
   mutate(mean_logK = a/(1-b),
          trt_var = trt_resid^2,
          var_logK = trt_var/(1-b),
-         upr_logK = mean_logK + 2*sqrt(var_logK),
-         lwr_logK = mean_logK - 2*sqrt(var_logK),
-         mean_logK_lwr = mean_logK - 1.96*sqrt(var_logK/nobs),
-         mean_logK_upr = mean_logK + 1.96*sqrt(var_logK/nobs)) %>%
+         upr_logK = mean_logK + 1.96*sqrt(var_logK),
+         lwr_logK = mean_logK - 1.96*sqrt(var_logK),
+         mean_logK_lwr = mean_logK - 1.96*sqrt(var_logK/(nobs - df_m3)),
+         mean_logK_upr = mean_logK + 1.96*sqrt(var_logK/(nobs - df_m3))) %>%
   # compute mean and var of original scale population         
   mutate(log_mean_K = mean_logK + var_logK/2,
          mean_K = exp(log_mean_K),
@@ -506,7 +506,7 @@ K_m3 %>%
   geom_jitter(data = mean_log_weevil, mapping = aes(y = mean_l_total, col = freplicate),size = 2, alpha = 0.5) +
   labs(title = "Estimated log carrying capacity",
        subtitle = "colored points are means of ln(N + 1) over total duration of experiment",
-       caption = "red lines denote E(K) +/- 2sd(K)\ndashed line is extinction threshold (ln(1))\nsolid line is log of mean initial population",
+       caption = "red lines denote 95 % PI\ndashed line is extinction threshold (ln(1))\nsolid line is log of mean initial population",
        x = "Percent peanut shell",
        y = "Log Carrying capacity (95 % CI)") +
   theme(legend.position = "n")
