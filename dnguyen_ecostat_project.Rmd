@@ -169,50 +169,45 @@ Habitat degredation a major threat to animal populations [@sala_global_2000]. As
 
 Both deterministic and stochastic forces drive population dynamics and extinction risk [@bjornstad_noisy_2001; @fung_partitioning_2019]. For example, low population growth rates are a deterministic driver of population declines whereas variability in population growth rates is a stochastic driver of increased extinction risk [@vucetich_population_2000]. Appropriately modeling the sources of stochasticity is important for accurate modeling of population dynamics and extinction risk [@melbourne_extinction_2008]. Therefore, when modeling the effect of a food quality on population growth it may be important to consider both fixed and random effects for accurate assessments of extinction risk.
 
-The main objective of this analysis is to identify the relative contributions of the deterministic and stochastic impact of resource quality on extinction time. Food quality may impact populations deterministically by affecting population growth rate and/or carrying capacity and stochastically by increasing variability of environmental noise. I will use existing time-series data of southern cowpea weevil (*Callosobruchus maculatus*) populations subjected to food quality treatments (M. Dyck unpublished). To quantify the contribution of deterministic and stochastic effects of food quality, I will fit a set of population models to the bean weevil data that allow for:
+The main objective of this analysis was to identify the relative contributions of the deterministic and stochastic impact of resource quality on extinction time. Food quality may impact populations deterministically by affecting population growth rate and/or carrying capacity and stochastically by increasing variability of environmental noise. I used existing time-series data of southern cowpea weevil (*Callosobruchus maculatus*) populations that had been experimentally subjected to differing food quality treatments (M. Dyck unpublished). To quantify the contribution of deterministic and stochastic effects of food quality, I fitted a set of population models to the bean weevil data that allow for: 1. Growth rate and density dependence to vary with food quality; 2. An additive effect of food quality on environmental noise; 3. Both 1 and 2. This set of models represent a deterministic effect only, a stochastic effect only, and both deterministic and stochastic effects of food quality, respectivelly. A fourth model was fit that allowed for a random effect of population (replicate x treatment combination) on the population growth rate in case there was variation among population not accounted for by the treatment. These models were compared by AIC to quantify support for each of the possible hypotheses. Goodness of fit for the best supported model was visually assessed by comparing model predictions and experimental observations. Metrics for assessing goodness of fit included: carrying capacity, population trajectories, the extinction frequency, and the mean and distribution of extinction times. 
 
-1. Growth rate and density dependence to vary with food quality;
-2. An additive effect of food quality on environmental noise;
-3. Both 1 and 2.
-
-The models will be compared by AIC and goodness of fit will be assessed by comparing the extinction frequency and extinction time distribution of the observed weevil populations and simulations from fitted models. 
+The model that included both a deterministic and stochastic effect of food quality on bean weevil population dynamics was best supported by the data. However, the best model was a poor fit to all the > 0 % peanut shell treatments since the model could not produce the population cycles characteristic of these populations, and instead absorbed the deterministic population cycles into the treatment specific residual variance. Hence, this analysis is inadequate for drawing any conclusion about the relative contributions of deterministic and stochastic effects of resource limitation on population dynamics and extinction because the model could not describe the mean dynamics of the data. Potential solutions to this problem are discussed.
 
 # Materials and methods
 
 ### Bean weevil population data
 
-The quality of food provided to the weevils was experimentally manipulated by manufacturing artificial bean pellets made from ground black-eyed pea powder and varying percentages of powdered peanut shells (0, 3, 5, 10, and 15 %). Larger percentages of peanut shell simulate lower food quality.  To initialize each replicate population, two males and two females were added every four days for the first 28 days of the experiment. After this initialization, two fresh bean pellets were added weekly without any further addition of adults. There were 10 replicate populations allocated to each treatment resulting in a total of 50 population time-series. Populations were maintained until the populations crashed or were stopped after 632 days (the 3 % peanut shell treatment was started later and ran for 400 days). A complete census of adult bean weevils was conducted every four days.
+The quality of food provided to the weevils was experimentally manipulated by manufacturing artificial bean pellets made from ground black-eyed pea powder and varying percentages of powdered peanut shells (0, 3, 5, 10, and 15 %). Larger percentages of peanut shell simulate lower food quality.  To initialize each replicate population, two males and two females from a population reared on whole chickpeas were added every four days for the first 28 days of the experiment. After this initialization, two fresh bean pellets were added weekly without any further addition of adults. There were 10 replicate populations allocated to each treatment resulting in a total of 50 population time-series. Populations were maintained until the populations crashed or were stopped after 632 days . A complete census of adult bean weevils was conducted every four days but the adults were not sexed and there was no count of eggs, larvae, or pupa (M. Dyck, unpublished).
 
-### Model structure and fitting
+### Model structure, fitting, and comparison
 
-The discrete-time stochastic Gompertz model will be fit to the remainder of weevil abundances after the initialization phase is removed. The Gompertz model is commonly used for modeling ecological populations [@dennis_estimating_2006]. The models will be estimated using a one-step fitting procedure which assumes that there is no observation noise [@bolker_ecological_2008]; this is an appropriate assumption since the populations were completely censused at each time point. 
+The discrete-time stochastic Gompertz model was fit to the remainder of weevil abundances after the initialization phase is removed. The Gompertz model is commonly used for modeling ecological populations [@dennis_estimating_2006]. The model were fit using a one-step fitting procedure which estimates process noise but not observation noise [@bolker_ecological_2008]. This is an appropriate assumption for these data  since the adult weevil populations were completely censused at each time point. 
 
 The full model is as follows:
 
-$$y_{t+1,i,j} = a_i + b_i y_t + c_i + d_j + \epsilon_{t,i,j} \\
-\epsilon_{t,i,j} \sim N(0,\sigma_0^2)\\
-c_i \sim N(0, \sigma_i^2)\\
-d_{ij} \sim N(0, \sigma_{rep}^2)$$
+$$y_{t+1,i,j} = a_i + b_i y_t + p_{ij} + \epsilon_{t,i,j}$$
+$$\epsilon_{t,i,j} \sim N(0,\sigma_i^2)\\$$
+$$p_{ij} \sim N(0, \sigma_{pop}^2)$$
 
-Where $\ln(N_{t,i,j} + 1) = y_{t,i,j}$ is the log-population abundance at times $t$ for peanut shell percentages $i = 0, 3, 5, 10, 15$ and replicates $j = 1, \ldots, 10$. The deterministic (fixed-effect) of food quality operates on weevil populations are represented by the population growth rate ($a_i$) and the strength of density dependence ($b_i$). The stochastic (random-effect) of food quality on weevil populations are represented by a food-specific increase in variance of population growth ($c_i$) from time step $t$ to $t+1$. The random effect of replicate and random error are denoted $d_j$ and $epsilon_{t,i,j}$ respectively.
+Where $\ln(N_{t,i,j} + 1) = y_{t,i,j}$ is the log-population abundance at times $t$ for peanut shell percentages $i = 0, 5, 10, 15$ and replicates $j = 1, \ldots, 10$. The deterministic (fixed-effect) of food quality operates on weevil populations are represented by the population growth rate ($a_i$) and the strength of density dependence ($b_i$). The stochastic (random-effect) of food quality on weevil populations are represented by a food-specific residual error (process noise) of population growth from time step $t$ to $t+1$. The random effect of bean weevil population is denoted $p_{ij}$.
 
-The model that includes only the deterministic impact of food quality is obtained by dropping the $c_i$ term. The model for only the stochastic impact of food quality is obtained by estimating a common population growth rate ($a$) and density dependence coefficient ($b$) across all food quality treatments.
+The model that includes only the deterministic impact of food quality is obtained by dropping the treatment index from the residual variance term. The model for only the stochastic impact of food quality is obtained by estimating a common population growth rate ($a$) and density dependence coefficient ($b$) across all food quality treatments while maintaing a treatment specific residual variance. The random effect can be omitted by dropping it from the model.
 
-<!-- A likely short-coming of the models I will fit is that the models only include the effect of the previous log-population abundance on the size of the next log-population abundance. However, the sampling frequency (every four days) is much shorter than the generation times of the weevils which range between 20 and 60 days depending on resource quality. A more careful analysis would involve assessing the number of lagged population sizes to capture the dynamics of the population data. -->
-<!-- * assumes process noise only (ok because population are completely censused at each observation time; Ben Bolker book) -->
-<!-- * higher-order lags can be collected into error term. Shaky assumption, especially considering that larvae and eggs are unobserved. A suitable approach would be to try using additional lagged terms which can be justified by Takens theorem (see ellner and turchin paper). -->
+Each of these four models was fit using the nlme package using the gls() or lme() functions as appropriate. Model comparison was done by AIC.
 
-<!-- ### Model set -->
+<!-- ### Estimating carrying capacity -->
 
-<!-- Full model -->
-
-### Estimating carrying capacity
-
-The expected log-abundance is $E(X_{\infty,i}) = a_i/(1-b_i)$, the variance of the stationary distribution of the log population is $V(X_{\infty,i}) = \sigma^2/(1-b_i)$, and the mean of the log-normal distribution of abundance is $E(N_{\infty,i}) = \exp[E(X_{\infty,i}) + V(X_{\infty,i})/2]$ [@dennis_estimating_2006].
+<!-- The expected log-abundance is $E(X_{\infty,i}) = a_i/(1-b_i)$, the variance of the stationary distribution of the log population is $V(X_{\infty,i}) = \sigma^2/(1-b_i)$, and the mean of the log-normal distribution of abundance is $E(N_{\infty,i}) = \exp[E(X_{\infty,i}) + V(X_{\infty,i})/2]$ [@dennis_estimating_2006]. -->
 
 ### Evaluating goodness of fit
 
-Assessing the goodness of fit for noisy populations is challenging because sensitivity to small changes in initial conditions and process noise may generate very different population trajectories [@wood_statistical_2010]. To avoid these issues, I will assess goodness of fit by comparing summary statistics of the observed data to the same summary statistics computed for simulated output from the fitted Gompertz models. For each fitted model, I will repeatedly simulate the model for the same number of time steps the experimental populations were observed and the same number of replicates used in the experiment. The summary statistics I will use are: (1) the frequency of populations that became extinct; (2) the distribution of time to extinction, conditioned on having observed extinctions.
+Assessing the goodness of fit for noisy populations is challenging because sensitivity to small changes in initial conditions and process noise may generate very different population trajectories [@wood_statistical_2010]. To avoid these issues, I assessed goodness of fit by comparing summary statistics of the observed data to the same summary statistics computed for simulated output. To do this, I simulated the Gompertz model using the point estimates from the best model for the same number of time steps as the experimental populations were observed and the same number of replicates used in the experiment. The statistics and observable parameters I used to assess model fit were: 
+
+1. The model predicted $\ln(\text{abundance} + 1)$ carrying capacity (estimated as in @dennis_estimating_2006) and the average observed $\ln(\text{abundance} + 1)$.
+1. 95 % prediction interval and observed population trajectories.
+1. The distribution of time to extinction, conditioned on having observed extinctions.
+1. The frequency of populations that became extinct.
+
 
 <!-- Statistical probes  ala Simon Wood (2010) -->
 
@@ -291,7 +286,7 @@ AIC(m1, m2, m3, m4) %>%
   add_column(model = c("model 1", "model 2", "model 3", "model 4")) %>%
   add_column(`log likelihood` = c(m1$logLik, m2$logLik, m3$logLik, m4$logLik)) %>%
   select(model,`log likelihood`, df, AIC, delta, weight) %>%
-  knitr::kable(digits = 3)
+  knitr::kable(digits = 2, caption = "Model comparison")
 ```
 
 ```{r AIC_5, eval = FALSE}
@@ -494,15 +489,15 @@ sims_small <- lapply(1:nrow(init_df), function(x)
 
 sims_small <- sims_small %>% mutate(N = N - 1) # correct for log(n + 1) transformation
 
-sims_small %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
-  ggplot() +
-  geom_line(aes(x = time*4 - 3, y = N, group = rep_sim), col = "red", alpha = 0.5) +
-  geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.7) +
-  facet_wrap(~ftreatment) +
-  labs(title = "Gompertz model simulations with parameters from top model",
-       y = "Abundance of adult bean weevil",
-         x = "Days since beginning of treatment",
-       caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
+# sims_small %>% unite("rep_sim",c("replicate", "sim"), remove = FALSE) %>%
+#   ggplot() +
+#   geom_line(aes(x = time*4 - 3, y = N, group = rep_sim), col = "red", alpha = 0.5) +
+#   geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.7) +
+#   facet_wrap(~ftreatment) +
+#   labs(title = "Gompertz model simulations with parameters from top model",
+#        y = "Abundance of adult bean weevil",
+#          x = "Days since beginning of treatment",
+#        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
 
 ```{r compute_95PI, cache = TRUE}
@@ -593,7 +588,8 @@ ggplot() +
   geom_vline(data = ext_mean_df, mapping = aes(xintercept = mean_extinction_day), size = 1.5, col = "red") +
   geom_vline(data = obs_ext_df, mapping = aes(xintercept = mean_time), size = 1.5, col = "blue") +
   facet_wrap(~ftreatment) +
-  labs(title = "Distribution of predicted and observed extinction times")
+  labs(title = "Distribution of predicted and observed extinction times",
+       x = "day of extinction")
 ```
 
 ```{r compare_obs_pred_ext}
