@@ -195,24 +195,14 @@ The model that includes only the deterministic impact of food quality is obtaine
 
 Each of these four models was fit using the nlme package using the gls() or lme() functions as appropriate. Model comparison was done by AIC.
 
-<!-- ### Estimating carrying capacity -->
-
-<!-- The expected log-abundance is $E(X_{\infty,i}) = a_i/(1-b_i)$, the variance of the stationary distribution of the log population is $V(X_{\infty,i}) = \sigma^2/(1-b_i)$, and the mean of the log-normal distribution of abundance is $E(N_{\infty,i}) = \exp[E(X_{\infty,i}) + V(X_{\infty,i})/2]$ [@dennis_estimating_2006]. -->
-
 ### Evaluating goodness of fit
 
 Assessing the goodness of fit for noisy populations is challenging because sensitivity to small changes in initial conditions and process noise may generate very different population trajectories [@wood_statistical_2010]. To avoid these issues, I assessed goodness of fit by comparing summary statistics of the observed data to the same summary statistics computed for simulated output. To do this, I simulated the Gompertz model using the point estimates from the best model for the same number of time steps as the experimental populations were observed and the same number of replicates used in the experiment. The statistics and observable parameters I used to assess model fit were: 
 
 1. The model predicted $\ln(\text{abundance} + 1)$ carrying capacity (estimated as in @dennis_estimating_2006) and the average observed $\ln(\text{abundance} + 1)$.
-1. 95 % prediction interval and observed population trajectories.
-1. The distribution of time to extinction, conditioned on having observed extinctions.
+1. 95 % prediction interval (computed from 8000 total simulated populations, i.e., 200 simulations for each replicate x treatment combination) and observed population trajectories.
+1. The distribution of time to extinction (abundance $\leq$ 0 on arithmetic scale), conditioned on having observed extinctions.
 1. The frequency of populations that became extinct.
-
-
-<!-- Statistical probes  ala Simon Wood (2010) -->
-
-<!-- * Use ar(1) and extinction time as statistical summaries -->
-<!-- * maybe use rolling mean and variance too? -->
 
 # Results
 
@@ -289,6 +279,11 @@ AIC(m1, m2, m3, m4) %>%
   knitr::kable(digits = 2, caption = "Model comparison")
 ```
 
+The model with the highest AIC weight was model 3 which included a deterministic and stochastic effect of food quality on population dynamics and had no random effect of population (replicate x treatment combination) on population growth rate (a). Model 4 which is the same as model 3 but including the random effect had a difference in AIC of 2 which indicates that the model is not more likely than model 3 and the only difference is the additional parameter estimated for the random effect variance component. The deterministic only (model 1) and stochastic only (model 2) have no credibility given the observed data (table 1.).
+
+Overall, model checking indicates that the model assumptions were largely satisfied for the 0 % peanut shell population but were not satistfied or all other treatment levels. There was some heteroscedasticity in residual variance for all treatment levels. The residual variance was larger for smaller fitted values. The heteroscedasticity was weakest for the 0 % treatment and stronger for all other treatment levels. There was some temporal autocorrelation for the 5 % treatment and strong temporal autocorrelation for the 10 and 15 % treatments. The distribution of residuals was non-normal (heavy tailed) for treatment levels 5 - 15 %.
+
+Model regression fit and diagnostics for the top model (deterministic and stochastic effect) are included in the appendix A2. 
 ```{r AIC_5, eval = FALSE}
 AIC(m1, m2, m3, m4, m5) %>%
   mutate(delta = AIC - min(AIC),
@@ -330,7 +325,7 @@ var_est_trt <- m3_aug %>%
   select(ftreatment, trt_resid = se_resid)
 ```
 
-# Model 3 parameter estimates
+# Parameter estimates for top model
 
 ```{r confidence_int}
 # get CI for a and b estimates of model 3
@@ -375,16 +370,20 @@ m3_int_table %>% select(treatment, parameter, `estimate (95 % CI)`) %>%
   knitr::kable(caption = "Parameter estimates for model 3: treatment specific variance")
 
 # plot
-m3_int_table %>%
-  ggplot() +
-  geom_point(aes(x = treatment, y = est.)) + 
-  geom_errorbar(aes(x = treatment, ymin = lower, ymax = upper)) +
-  facet_wrap(~parameter) +
-  labs(title = "Parameter estimates for model 3: treatment specific variance",
-       y = "Estimate (95 % CI)",
-       x = "treatment (proportion peanut shell)")
+# m3_int_table %>%
+#   ggplot() +
+#   geom_point(aes(x = treatment, y = est.)) + 
+#   geom_errorbar(aes(x = treatment, ymin = lower, ymax = upper)) +
+#   facet_wrap(~parameter) +
+#   labs(title = "Parameter estimates for model 3: treatment specific variance",
+#        y = "Estimate (95 % CI)",
+#        x = "treatment (proportion peanut shell)")
 
 ```
+
+Bean weevil opulation growth rate (a) decreased as food quality decreased (peanut shell increased). Density dependence was stronger for the low food quality treatments compared to the 0 % peanut shell treatment. The standard deviation of the process noise for treatments with > 0 % peanut shell was roughly twice as large compared to the process noise for the 0 % peanut shell treatment (table 2.).
+
+## Goodness of fit for top model
 
 ```{r get_parms}
 # extract parameter estimates from top model
@@ -411,7 +410,7 @@ init_pop <-
 init_df <- inner_join(init_pop, parm_est)
 ```
 
-# Predicted carrying capacity
+### Predicted carrying capacity vs. mean observed population abundances
 
 ```{r calc_K}
 nobs <- weevil %>% filter(!is.na(l_total),!is.na(l_next_total)) %>% group_by(treatment) %>% summarize(nobs = n()) %>% 
@@ -471,8 +470,9 @@ K_m3 %>%
   theme(legend.position = "n")
 ```
 
+The model prediction and experimental observations were compared on the $\ln(\text{abundance} + 1)$ scale. For the 0 % peanut shell treatment, the model predicted that the expected carrying capacity would be larger than the average initial population size, whereas the model predicts for all other treatment levels that the carrying capacity would be lower and that the extinction threshold was within the middle 95 % probability density of the carrying capacity distribution (which is normal on the log-scale cf. @dennis_estimating_2006). The observed data were within two standard deviations of the expected carrying capacity for populations in treatment levels 0, 10, and 15 % but exceeded the upper limit of the interval for populations under the 5 % treatment for which there were large transient oscillations in population abundance. Note, for interpretative purposes that comparing the predicted carrying capacity to the observed data may not be appropriate since the observed populations may not have yet reached their equilibrial dyanamics during the population experiments which can explain the systematic deviations for the 5 % treatment populations.
 
-# simulations with estimated parameters
+### Predicted 
 
 ```{r}
 sims_small <- lapply(1:nrow(init_df), function(x)
@@ -529,12 +529,19 @@ sim_interval <- sims %>%
 sim_interval %>%
   ggplot() +
   geom_ribbon(aes(x = time, ymin = p5, ymax = p95), alpha = 0.3, fill = "red") + 
-  geom_line(aes(x = time, y = mean_N), alpha = 0.5, size = 2) +
+  # geom_line(aes(x = time, y = mean_N), alpha = 0.5, size = 2) +
   geom_line(aes(x = time, y = p50), size = 2, linetype = 2) +
   geom_line(data = weevil, mapping = aes(x = days - 32, # backshift by days spent initializing population
                                          y = total, group = replicate), alpha = 0.5) +
-  facet_wrap(~ftreatment)
+  facet_wrap(~ftreatment) +
+  labs(y = "Adult weevil abundance (95 % prediction interval)",
+       x = "time since treatment (days)",
+       caption = "Dashed line denotes median prediction")
 ```
+
+The 95 % prediction intervals for the top model cover most of the observed population abundances over time for the 0 % shell treatment. However, the 95 % PI has very low coverage of the observed population abundances beyond the initial decline observed across all the low quality food treatments.
+
+### Predicted and observed extinction frequency and distribution and mean of extinction time
 
 ```{r obs_extinction_time}
 # get mean time to extinction and proportion of populations that went extinct
@@ -589,8 +596,11 @@ ggplot() +
   geom_vline(data = obs_ext_df, mapping = aes(xintercept = mean_time), size = 1.5, col = "blue") +
   facet_wrap(~ftreatment) +
   labs(title = "Distribution of predicted and observed extinction times",
-       x = "day of extinction")
+       x = "day of extinction",
+       caption = "rug lines represent extinction time of specific populations")
 ```
+
+No populations in the 0 % peanut shell treatment were predicted or observed to go extinct. All populations in other treatments were predicted to go extinct and these extinction time predictions were systematically biased low compared to the observed extinction times by one order of magnitude (table 3.). While only 2 out of the the 10 replicate populations for the 5 % shell treatment were observed to go extinct, all simulations resulted in extinction for this treatment level.
 
 ```{r compare_obs_pred_ext}
 # calc number of runs for each treatment
@@ -619,8 +629,12 @@ obs_ext_summary <- obs_ext_df %>% group_by(ftreatment) %>% slice(1) %>%
 options(knitr.kable.NA = '-')
 full_join(pred_ext_summary, obs_ext_summary) %>%
   select(1,2,4,3,5) %>%
-  knitr::kable()
+  knitr::kable(caption = "Comparison of model predictions and observed population extinction")
 ```
+
+# Discussion
+
+
 
 \newpage
 
