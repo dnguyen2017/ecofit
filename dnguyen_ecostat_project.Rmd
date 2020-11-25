@@ -596,7 +596,7 @@ ggplot() +
   labs(title = "Distribution of predicted and observed extinction times")
 ```
 
-```{r}
+```{r compare_obs_pred_ext}
 # calc number of runs for each treatment
 sims_per_trt <- nsims * 10
 # get the proportion of runs that went extinct per treatment
@@ -636,7 +636,7 @@ full_join(pred_ext_summary, obs_ext_summary) %>%
 
 # Appendix
 
-## Linear regression prediction plot
+## A1. Fit of model on $log(x+1)$ scale
 
 ```{r lin_reg_plot}
 # can I get CI for gls plot?
@@ -659,13 +659,15 @@ nd %>%
   ggplot() +
   geom_line(aes(x = l_total, y = l_next_total), size = 1) +
   geom_ribbon(aes(x = l_total, ymin = l_next_total - 2*SE, ymax = l_next_total + 2 * SE), alpha = 0.5) +
-  geom_point(data = weevil, mapping = aes(x = l_total, y = l_next_total, col = freplicate), alpha = 0.5) +
+  geom_point(data = weevil, mapping = aes(x = l_total, y = l_next_total, col = freplicate), alpha = 0.2) +
   facet_wrap(~ftreatment) +
   theme(legend.position = "n") +
   labs(title = "Top model prediction",y = "Next log(abundance)",
        x = "Current log(abundance)")
 
 ```
+
+Here is the model predictions on the scale at which the model was fit. The model captures the mean behavior of the data relatively well across treatments. However, the error is larger for smaller observed  $\log(\text{abundance} + 1)$. Because of the transformation used the errors are also strongly non-normal at small values since the response is constrained to be $\geq 0$. 
 
 ```{r eval = FALSE}
 # prediction plot using fitted points from augment.gls
@@ -679,7 +681,7 @@ m3_aug %>%
        x = "Current log(abundance)")
 ```
 
-## Diagnostic plots for model 3
+## A2. Diagnostic plots for model 3
 
 ```{r resid_plot}
 m3_aug %>%
@@ -692,6 +694,7 @@ m3_aug %>%
   theme(legend.position = "n")
 
 ```
+The residual plots show that the models capture the expected value of the response (on $log(x+1)$ scale) since the expected value of the residual error is zero. However, there is a clear increase in the residual variance for smaller fitted values. This can be attributed to the tendancy of the weevil populations to crash to zero for a few time steps then increase suddenly due to the dynamics of weevil stage structure. This can be observed in the time series of the weevil abundances on the original scale. 
 
 ```{r loc_scale_plot}
 m3_aug %>%
@@ -699,7 +702,7 @@ m3_aug %>%
   mutate(std_resid = residuals/sd(residuals),
          sqrt_abs_resid = sqrt(abs(std_resid))) %>%
   ggplot(aes(x = fitted, y = sqrt_abs_resid)) +
-  geom_point(aes(col = freplicate)) +
+  geom_point(aes(col = freplicate), alpha = 0.5) +
   geom_smooth() +
   geom_hline(yintercept = 0.822, linetype = 2) + facet_wrap(~ftreatment) +
   labs(title = "Location-scale plot: model 3",
@@ -708,7 +711,7 @@ m3_aug %>%
       col = "Treatment") +
   theme(legend.position = "n")
 ```
-
+These plots demonstrate that the residuals are not homogeneous for the 5 % and 10 % treatments.
 
 ```{r qq_plot}
 # qqline
@@ -718,56 +721,62 @@ slope <- diff(y)/diff(x)
 int <- y[1L] - slope * x[1L]
 
 ggplot(m3_aug, aes(sample = residuals)) + stat_qq() + geom_abline(slope = slope, 
-    intercept = int) + facet_wrap(~ftreatment)
+    intercept = int) + facet_wrap(~ftreatment) + 
+  labs(title = "QQ plots")
 ```
+The residuals for 0 % peanut shell are reasonably normal. There are strong departures from normality (heavy-tails) for treatments 5 - 15 %. This implies that confidence intervals computed assuming normal residuals will be too narrow.
 
+## A3. Residuals vs. time
 
-### Residuals vs. time
-
-```{r resid_time}
+```{r resid_time, out.width="50%", fig.show="hold"}
 m3_aug %>%
   filter(ftreatment == 0) %>%
   ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
+  geom_point(alpha = 0.5) +
+  geom_line(alpha = 0.5) +
+  # geom_smooth() +
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "0 % shell")
+  labs(title = "0 % shell")
 
 m3_aug %>%
   filter(ftreatment == 0.05) %>%
   ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
+  geom_point(alpha = 0.5) +
+  geom_line(alpha = 0.5) +
+  # geom_smooth() +
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "5 % shell")
+  labs(title = "5 % shell")
+```
+There are no obvious temporal patterns in the residuals for 0 % shell. These is some evidence of cycling evident in the 5 % shell treatment that was not captured by the model (i.e., replicates 2, 6, and 8)
 
+
+```{r trt_3_4, out.width="50%", fig.show="hold"}
 m3_aug %>%
   filter(ftreatment == 0.1) %>%
   ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
+  geom_point(alpha = 0.5) + 
+  geom_line(alpha = 0.5) +
+  #geom_smooth() +
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "10 % shell")
+  labs(title = "10 % shell")
 
 m3_aug %>%
   filter(ftreatment == 0.15) %>%
   ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
+  geom_point(alpha = 0.5) + 
+  geom_line(alpha = 0.5) +
+  #geom_smooth() +
   geom_hline(yintercept = 0, linetype = 2) +
   facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "15 % shell")
+  labs(title = "15 % shell")
 ```
+There is obvious periodicity present in the residual vs time plots for the 10 % and 15 % peanut shell treatments.
 
-
-## Population level prediction plots
+## A4. Population level prediction plots
+The following simulations are only conditioned on the initial population size one treatment starts (day 32). That is, the model is not conditioned on the current data point at each prediction.
 
 ```{r}
 filter(sims_small, ftreatment == 0) %>%
@@ -783,6 +792,7 @@ filter(sims_small, ftreatment == 0) %>%
 
 
 ```
+
 ```{r}
 filter(sims_small, ftreatment == 0.05) %>%
   ggplot() +
@@ -821,9 +831,4 @@ filter(sims_small, ftreatment == 0.15) %>%
        subtitle = "15 % peanut shell",
          x = "Days since beginning of treatment",
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
-```
-
-
-```{r }
-knitr::knit_exit()
 ```
