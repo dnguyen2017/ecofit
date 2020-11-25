@@ -2,16 +2,16 @@
 title: "Deterministic and stochastic effects of food quality on extinction time"
 author: "David Nguyen"
 date: "October 20, 2020"
-output: 
-  html_document:
-    code_folding: hide
+output: "pdf_document"
+  # html_document:
+  #   code_folding: hide
 # output:
 #   word_document: default
 bibliography: nres803.bib
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(readxl)
 library(broom.mixed)
@@ -181,23 +181,6 @@ The models will be compared by AIC and goodness of fit will be assessed by compa
 
 ### Bean weevil population data
 
-```{r plot_all, eval = FALSE}
-full_df %>%
-  filter(treatment != 0.03) %>%
-  ggplot(aes(x = days, y = total, group = replicate, col = as.factor(replicate) )) +
-  geom_line() + 
-  facet_wrap(~treatment) +
-  theme_light() +
-  theme(legend.position = "none") +
-  scale_x_continuous(breaks = seq(0, 650, by = 100)) +
-  scale_y_continuous(breaks = seq(0, 50, by = 10)) +
-  labs(title = "Bean weevil populations over time",
-       caption = "For each plot, weevils were fed pellets with a different proportion of peanut shell additive.\nEach color is a different replicate.",
-       y = "Bean weevil count",
-       x = "Time (days)")
-
-```
-
 The quality of food provided to the weevils was experimentally manipulated by manufacturing artificial bean pellets made from ground black-eyed pea powder and varying percentages of powdered peanut shells (0, 3, 5, 10, and 15 %). Larger percentages of peanut shell simulate lower food quality.  To initialize each replicate population, two males and two females were added every four days for the first 28 days of the experiment. After this initialization, two fresh bean pellets were added weekly without any further addition of adults. There were 10 replicate populations allocated to each treatment resulting in a total of 50 population time-series. Populations were maintained until the populations crashed or were stopped after 632 days (the 3 % peanut shell treatment was started later and ran for 400 days). A complete census of adult bean weevils was conducted every four days.
 
 ### Model structure and fitting
@@ -350,14 +333,6 @@ var_est_trt <- m3_aug %>%
   summarize(sd_resid, se_resid) %>%  
   slice(1) %>%
   select(ftreatment, trt_resid = se_resid)
-```
-
-
-```{r eval = FALSE}
-# check for the largest jump in abundance
-weevil %>% group_by(ftreatment, freplicate) %>% mutate(difference = l_next_total - l_total, max_diff = max(difference, na.rm = TRUE)) %>% filter(difference == max_diff) %>%
-  group_by(ftreatment) %>%
-  filter(difference == max(max_diff)) 
 ```
 
 # Model 3 parameter estimates
@@ -651,10 +626,13 @@ full_join(pred_ext_summary, obs_ext_summary) %>%
   knitr::kable()
 ```
 
+\newpage
 
 # References {-}
 
 <div id="refs"></div>
+
+\newpage
 
 # Appendix
 
@@ -703,7 +681,7 @@ m3_aug %>%
 
 ## Diagnostic plots for model 3
 
-```{r}
+```{r resid_plot}
 m3_aug %>%
   ggplot(aes(x = fitted, y = residuals)) +
   geom_jitter(aes(col = freplicate), alpha = 0.3, size = 2) +
@@ -713,6 +691,9 @@ m3_aug %>%
   labs(title = "Residual vs fitted plot: model 3") +
   theme(legend.position = "n")
 
+```
+
+```{r loc_scale_plot}
 m3_aug %>%
   group_by(ftreatment) %>%
   mutate(std_resid = residuals/sd(residuals),
@@ -726,7 +707,10 @@ m3_aug %>%
       y = "sqrt(abs(std.resid))",
       col = "Treatment") +
   theme(legend.position = "n")
+```
 
+
+```{r qq_plot}
 # qqline
 y <- quantile(m3$residuals, c(0.25, 0.75))
 x <- qnorm(c(0.25, 0.75))
@@ -735,29 +719,53 @@ int <- y[1L] - slope * x[1L]
 
 ggplot(m3_aug, aes(sample = residuals)) + stat_qq() + geom_abline(slope = slope, 
     intercept = int) + facet_wrap(~ftreatment)
+```
 
+
+### Residuals vs. time
+
+```{r resid_time}
+m3_aug %>%
+  filter(ftreatment == 0) %>%
+  ggplot(aes(x = days, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       subtitle = "0 % shell")
 
 m3_aug %>%
-  ggplot(aes(x = l_total, y = residuals, col = freplicate)) +
-  geom_jitter() +
+  filter(ftreatment == 0.05) %>%
+  ggplot(aes(x = days, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
   geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~ftreatment) +
-  labs(title = "residuals vs observed values",
-      x = "observed ln(abundance)",
-      col = "Treatment") +
-  theme(legend.position = "n")
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       subtitle = "5 % shell")
 
-weevil %>%
-  ggplot(aes(x = l_total, y = r, col = freplicate)) +
-  geom_jitter() +
+m3_aug %>%
+  filter(ftreatment == 0.1) %>%
+  ggplot(aes(x = days, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
   geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~ftreatment) +
-  labs(title = "residuals vs observed values",
-      x = "observed ln(abundance)",
-      y = "population growth ln(N_t+1/N_t)",
-      col = "Treatment") +
-  theme(legend.position = "n")
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       subtitle = "10 % shell")
+
+m3_aug %>%
+  filter(ftreatment == 0.15) %>%
+  ggplot(aes(x = days, y = residuals)) +
+  geom_point() + 
+  geom_smooth() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  facet_wrap(~replicate) +
+  labs(title = "Residual plot for one-step-ahead model",
+       subtitle = "15 % shell")
 ```
+
 
 ## Population level prediction plots
 
@@ -818,323 +826,4 @@ filter(sims_small, ftreatment == 0.15) %>%
 
 ```{r }
 knitr::knit_exit()
-```
-
-
-# Boxplot of residuals
-
-```{r}
-augment(m3) %>%
-  rename(fitted = .fitted, residuals= .resid) %>%
-  group_by(ftreatment) %>%
-  mutate(var_resid = var(residuals),
-         resid_lwr = -1.96*var_resid,
-         resid_upr = 1.96*var_resid) %>%
-  ggplot(aes(x = as.factor(replicate), y = residuals)) +
-  geom_boxplot() +
-  geom_jitter(aes(col = ftreatment, shape = ftreatment),alpha = 0.4)  +
-  geom_hline(yintercept = 0, linetype = 2, size = 1.5, alpha = 0.5) +
-  coord_flip() +
-  labs(title = "Residuals for ML estimated model",
-       col = "treatment", shape = "treatment",
-       x = "treatment x replicate") +
-  facet_wrap(~ftreatment)
-```
-
-# More plots
-
-```{r}
-# increments for x and y axis
-inc_total <- 5
-inc_days <- 50 
-
-# get max days and total, each rounded to the nearest value of inc_*
-spark_lims <- 
-  full_df %>% 
-  select(days, total) %>% 
-  summarise(max_days = ceiling(max(days)/inc_days)*inc_days, 
-            max_total = ceiling(max(total)/inc_total) * inc_total )
-
-spark_list <- lapply(seq_along(pct_peanut_shells),
-                     function(x)
-                       full_df %>%
-  filter(treatment == pct_peanut_shells[x]) %>%
-  ggplot(aes(x = days, y = total)) +
-  geom_line() +
-  scale_y_continuous(breaks = seq(0, spark_lims$max_total, by = 2*inc_total),
-                     limits = c(0, spark_lims$max_total)) +
-  scale_x_continuous(breaks = seq(0, spark_lims$max_days, by = 2*inc_days),
-                     limits = c(0, spark_lims$max_days)) +
-  labs(title = paste0(pct_peanut_shells[x]*100, " % peanut shell in food pellets")) +
-  facet_wrap(~replicate))
-
-# 0 % peanut shells
-spark_list[[1]]
-```
-
-```{r}
-spark_list[[3]]
-```
-
-```{r}
-spark_list[[4]]
-```
-
-```{r}
-spark_list[[5]]
-```
-
-```{r extinction_table}
-weevil %>%
-  group_by(treatment, replicate) %>%
-  slice(1) %>%
-  summarise(last_day) %>%
-  filter(!is.na(last_day)) %>%
-  arrange(treatment, replicate) %>%
-  knitr::kable()
-```
-
-### log(next_abundance + 1) vs log(abundance + 1)
-
-```{r plot_log_next_pop, fig.show="hold", out.width="50%"}
-weevil %>%
-  ggplot(aes(x = l_total, y = l_next_total)) +
-  geom_point(aes(col = as.factor(replicate)), alpha = 0.4) +
-  geom_smooth(method = "lm") +
-  facet_wrap(~treatment) + theme(legend.position = "n")
-
-weevil %>%
-  ggplot(aes(x = l_total, y = l_next_total)) +
-  geom_point(alpha = 0.4) +
-  geom_smooth(method = "lm") +
-  facet_grid(ftreatment ~ replicate)
-```
-
-
-```{r m3_resids, message=FALSE, warning = FALSE}
-m3_aug %>%
-  filter(ftreatment == 0) %>%
-  ggplot(aes(x = fitted, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "0 % shell")
-
-m3_aug %>%
-  filter(ftreatment == 0.05) %>%
-  ggplot(aes(x = fitted, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "5 % shell")
-
-m3_aug %>%
-  filter(ftreatment == 0.1) %>%
-  ggplot(aes(x = fitted, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "10 % shell")
-
-m3_aug %>%
-  filter(ftreatment == 0.15) %>%
-  ggplot(aes(x = fitted, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "15 % shell")
-```
-
-Plots of residuals vs. expected values look good for the one-step-ahead model.
-
-Are the variances homogeneous across treatments?
-
-```{r}
-m3_aug %>%
-  ggplot(aes(x = ftreatment, y = residuals)) +
-  geom_boxplot() +
-  geom_jitter(alpha = 0.2) 
-
-m3_aug %>%
-  ggplot(aes(x = rep_trt, y = residuals)) +
-  geom_boxplot() +
-  geom_jitter(aes(col = ftreatment, shape = ftreatment),alpha = 0.4)  +
-  geom_hline(yintercept = 0, linetype = 2, size = 1.5, alpha = 0.5) +
-  coord_flip() +
-  labs(title = "Residuals for ML estimated model",
-       col = "treatment", shape = "treatment",
-       x = "treatment x replicate")
-
-m3_aug %>%
-  group_by(ftreatment) %>%
-  mutate(resid_var = var(residuals)) %>%
-  slice(1) %>%
-  summarize(resid_var)
-
-# p_reml_fit <- augment(pop_trt_reml, weevil) %>% rename("residuals" = .resid, "fitted" = .fitted)
-# p_reml_fit %>%
-#   ggplot(aes(x = rep_trt, y = residuals)) +
-#   geom_boxplot() +
-#   geom_jitter(aes(col = ftreatment),alpha = 0.2)  +
-#   geom_hline(yintercept = 0, linetype = 2, size = 1.5, alpha = 0.5) +
-#   coord_flip()
-
-```
-
-
-But is there any autocorrelation in residuals? Lets look visually first, then check using ACF or Ljung-Box tests.
-
-```{r}
-m3_aug %>%
-  filter(ftreatment == 0) %>%
-  ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "0 % shell")
-
-m3_aug %>%
-  filter(ftreatment == 0.05) %>%
-  ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "5 % shell")
-
-m3_aug %>%
-  filter(ftreatment == 0.1) %>%
-  ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "10 % shell")
-
-m3_aug %>%
-  filter(ftreatment == 0.15) %>%
-  ggplot(aes(x = days, y = residuals)) +
-  geom_point() + 
-  geom_smooth() +
-  geom_hline(yintercept = 0, linetype = 2) +
-  facet_wrap(~replicate) +
-  labs(title = "Residual plot for one-step-ahead model",
-       subtitle = "15 % shell")
-```
-
-```{r}
-knitr::knit_exit()
-```
-
-Trash heap below this point
-
-To examine the effect of treatment specific variance in isolation I simulate the gompertz model using the fixed effects estimates for the control and the environmental variance estimates for each treatment.
-
-```{r}
-sims_vary_noise <- lapply(1:nrow(init_df), function(x)
-  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
-             lambda = unlist(init_df[1, "a"]), 
-             b = unlist(init_df[1,"b"]), 
-             sd_proc = unlist(init_df[x,"trt_resid"]), 
-             tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 1,
-             replicate = unlist(init_df[x,"replicate"]),
-             ftreatment = unlist(init_df[x,"ftreatment"]))
-  ) %>%
-  bind_rows()
-
-sims_vary_noise %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_wrap(~ftreatment)
-```
-
-Hold all parameters at control but use factor specific population growth rate
-
-```{r}
-sims_vary_a <- lapply(1:nrow(init_df), function(x)
-  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
-             lambda = unlist(init_df[x, "a"]), 
-             b = unlist(init_df[1,"b"]), 
-             sd_proc = unlist(init_df[1,"trt_resid"]), 
-             tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 1,
-             replicate = unlist(init_df[x,"replicate"]),
-             ftreatment = unlist(init_df[x,"ftreatment"]))
-  ) %>%
-  bind_rows()
-
-sims_vary_a %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_wrap(~ftreatment)
-```
-
-Hold all parameters at control but use factor specific density dependence
-
-```{r}
-sims_vary_b <- lapply(1:nrow(init_df), function(x)
-  sim_log_gomp(xinit = unlist(init_df[x, "l_total"]),
-             lambda = unlist(init_df[1, "a"]), 
-             b = unlist(init_df[x,"b"]), 
-             sd_proc = unlist(init_df[1,"trt_resid"]), 
-             tfinal = unlist(init_df[x,"tfinal"]), 
-             nsim = 1,
-             replicate = unlist(init_df[x,"replicate"]),
-             ftreatment = unlist(init_df[x,"ftreatment"]))
-  ) %>%
-  bind_rows()
-
-sims_vary_b %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = replicate), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_wrap(~ftreatment)
-```
-
-```{r demo_possible_dynamics, eval = FALSE}
-sens_par <- crossing(init = log(100),
-       a = c(0.9, 1, 1.1),
-       b = c(-0.5, - 0.25, 0.25, 0.75),
-       sd = unlist(init_df[1,"trt_resid"]))
-
-sims_sens <- lapply(1:nrow(sens_par), function(x)
-  sim_log_gomp(xinit = unlist(sens_par[x, "init"]),
-             lambda = unlist(sens_par[x, "a"]), 
-             b = unlist(sens_par[x,"b"]), 
-             sd_proc = unlist(sens_par[1,"sd"]), 
-             tfinal = 100, 
-             nsim = 5,
-             replicate = 1,
-             ftreatment = 1)
-  ) %>%
-  bind_rows()
-
-sims_sens %>%
-  ggplot() +
-  geom_line(aes(x = time*4, y = N, group = sim), col = "red", alpha = 0.5) +
-  #geom_line(data = weevil, mapping = aes(x = days - 32, y = total, group = replicate), alpha = 0.3) +
-  facet_grid(lambda~b_, scales = "free")
-  #facet_wrap(~b_, scale = "free_y")
-```
-
-
-```{r acf, eval = FALSE}
-# need to write code to extract lag(1) acf
-acf1 <- sims %>% filter(ftreatment == 0, replicate == 1, sim == 1) %>% pull(N) %>% acf(plot = FALSE, lag = 1)
-acf1$acf[2]
 ```
