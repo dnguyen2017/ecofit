@@ -472,7 +472,7 @@ K_m3 %>%
 
 The model prediction and experimental observations were compared on the $\ln(\text{abundance} + 1)$ scale. For the 0 % peanut shell treatment, the model predicted that the expected carrying capacity would be larger than the average initial population size, whereas the model predicts for all other treatment levels that the carrying capacity would be lower and that the extinction threshold was within the middle 95 % probability density of the carrying capacity distribution (which is normal on the log-scale cf. @dennis_estimating_2006). The observed data were within two standard deviations of the expected carrying capacity for populations in treatment levels 0, 10, and 15 % but exceeded the upper limit of the interval for populations under the 5 % treatment for which there were large transient oscillations in population abundance. Note, for interpretative purposes that comparing the predicted carrying capacity to the observed data may not be appropriate since the observed populations may not have yet reached their equilibrial dyanamics during the population experiments which can explain the systematic deviations for the 5 % treatment populations.
 
-### Predicted 
+### 95 % prediction interval and observed population trajectories
 
 ```{r}
 sims_small <- lapply(1:nrow(init_df), function(x)
@@ -539,7 +539,7 @@ sim_interval %>%
        caption = "Dashed line denotes median prediction")
 ```
 
-The 95 % prediction intervals for the top model cover most of the observed population abundances over time for the 0 % shell treatment. However, the 95 % PI has very low coverage of the observed population abundances beyond the initial decline observed across all the low quality food treatments.
+The 95 % prediction intervals for the top model cover most of the observed population abundances over time for the 0 % shell treatment. However, the 95 % PI has very low coverage of the observed population abundances beyond the initial decline observed across all the low quality food treatments. See Appendix section A4 for plots showing individual populations and predictions.
 
 ### Predicted and observed extinction frequency and distribution and mean of extinction time
 
@@ -634,7 +634,13 @@ full_join(pred_ext_summary, obs_ext_summary) %>%
 
 # Discussion
 
+Population dynamics and extinction are driven by both deterministic and stochastic effects. 
+Confrontation of ecological models representing different hypotheses to population dynamics of bean weevils indicates that food limitation may have both deterministic and stochastic effects on population dynamics. 
+However, the precending analysis is not a strong affirmation or rejection since the best fitted model was only capable of reproducing the features of the non-resource limited populations. 
+The strong periodicity of the food-limited populations is not possible under the direct-density dependence Gompertz model which was fitted to these data. 
+Therefore, consideration of models capable of producing cyclical dynamics would be more appropriate for these data and would facilitate stronger tests of hypotheses about the deterministic and stochastic impacts of food-limitation on population dynamics.
 
+Future work could consider models that include delayed-density dependence or additional population lags. Models with delayed density dependence can produce cycles qualitatively similar to those observed in the weevil data and have been previously shown to provide a good fit to similar experimental populations (Nicholson's blowfly food-limitation experiments @wood_statistical_2010). Delayed density dependence would be a biologically justifiable assumption since egg laying decisions and larval success are density dependent and bean weevils development time ranges from a 20 - 60 days depending on food-quality (M. Dyck, unpublished). Models with additional population lags may be justified since not all stages of the weevil population are observed. Including lags of a univariate population time series as covariates can be used to account for the effect unobserved stages [@turchin_complex_2003].
 
 \newpage
 
