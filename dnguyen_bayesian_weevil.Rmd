@@ -396,12 +396,12 @@ data <-
 #   )
 inits <-
   list(
-    list(mu_a = rep(1, 4), mu_b = rep(0.5, 4), sd_a = 1/5, sd_b = 1/5),
-    list(mu_a = rep(0.5, 4), mu_b = rep(0.2, 4), sd_a = 1/10, sd_b = 1/10),
-    list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), sd_a = 1/100, sd_b = 1/100)
+    list(mu_a = rep(1, 4), mu_b = rep(0.5, 4), tau_a = 1/5, tau_b = 1/5),
+    list(mu_a = rep(0.5, 4), mu_b = rep(0.2, 4), tau_a = 1/10, tau_b = 1/10),
+    list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), tau_a = 1/100, tau_b = 1/100)
   )
 
-variablenames <- c("mu_a","mu_b", "sd_a","sd_b")
+variablenames <- c("mu_a","mu_b", "sd_a","sd_b","K")
 modelstring="
 model{
   #likelihood
@@ -413,8 +413,8 @@ model{
   # priors
   for (i in 1:length(streatment)) {
   for (j in 1:length(sreplicate)) {
-      a[i, j] ~ dnorm(mu_a[i], 1/sd_a)
-      b[i, j] ~ dnorm(mu_b[i], 1/sd_b)
+      a[i, j] ~ dnorm(mu_a[i], tau_a)
+      b[i, j] ~ dnorm(mu_b[i], tau_b)
   }
   }
   # prior for mean a and b
@@ -424,14 +424,23 @@ model{
   }
 
   # prior for sd
-  sd_a ~ dgamma(0.001, 0.001)
-  sd_b ~ dgamma(0.001, 0.001)
+  tau_a ~ dgamma(0.001, 0.001)
+  tau_b ~ dgamma(0.001, 0.001)
+
+  # get sd
+  sd_a <- 1/sqrt(tau_a)
+  sd_b <- 1/sqrt(tau_b)
+
+  # Derived quantity
+  for (i in 1:4) {
+    K[i] <- exp(mu_a[i]/(1-mu_b[i]))
+  }
 }"
 
 jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
 update(jm, n.iter=10000) #burn-in
 cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
-#save(cs, file = "chains/weevil_random_trt_no_proc_weird.RData")
+save(cs, file = "chains/weevil_random_trt_no_proc.RData")
 ``` 
 >Error in update.jags(model, n.iter, ...) : Error in node a[4,10]
 Slicer stuck at value with infinite density
@@ -494,7 +503,7 @@ inits <-
     list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), tau_a = 1/100, tau_b = 1/100, tau_p = 0.005)
   )
 
-variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p")
+variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")
 modelstring="
 model{
   #likelihood
@@ -519,18 +528,23 @@ model{
   # prior for sd
   tau_a ~ dgamma(0.001, 0.001)
   tau_b ~ dgamma(0.001, 0.001)
-  tau_p ~ dunif(0, 0.5) # same process error across treatments
+  tau_p ~ dgamma(0.001, 0.001) # same process error across treatments
 
   # get sd
   sd_a <- 1/sqrt(tau_a)
   sd_b <- 1/sqrt(tau_b)
   sd_p <- 1/sqrt(tau_p)
+
+  # Derived quantity
+  for (i in 1:4) {
+    K[i] <- exp(mu_a[i]/(1-mu_b[i]))
+  }
 }"
 
 jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
 update(jm, n.iter=10000) #burn-in
-cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
-#save(cs, file = "chains/weevil_random_trt_proc_error_weird.RData")
+cs = coda.samples(jm,variable.names = variablenames,n.iter=20000) #generate chains
+save(cs, file = "chains/weevil_random_trt_proc_error.RData")
 ``` 
 
 The first time I fit the full model, I accidently misspecified the precision as the standard error. Other than having "sd" estimates that were wrong, the fit seemed fine (all plots on left hand side). I fixed the error and estimated sd correctly. However, now the chains have really odd behavior (plots on right hand side). I'm not sure why there would be such a massive difference from run-to-run.
