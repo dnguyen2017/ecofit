@@ -1,0 +1,904 @@
+---
+title: "Deterministic and stochastic effects of food quality on extinction time"
+author: "David Nguyen"
+date: "`r Sys.Date()`"
+output: "html_document"
+  # html_document:
+  #   code_folding: hide
+# output:
+#   word_document: default
+bibliography: nres803.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(rjags)
+library(runjags)
+library(mcmcplots)
+library(MCMCvis)
+library(bayesplot)
+theme_set(theme_bw())
+color_scheme_set("viridis")
+
+weevil <- read_csv("weevil_data\\lagged_weevil.csv", col_types = cols(.default = "d", rep_trt = "c", ftreatment = "f", freplicate = "f"))
+weevil <- 
+  weevil %>% 
+  mutate(freptrt = ftreatment:freplicate) %>%
+  arrange(freptrt)
+```
+
+```{r munge_data, include = FALSE, eval = FALSE}
+library(readxl)
+# get names of sheets that contain pop data (not including T15-8 for now)
+sheet_names <- excel_sheets("weevil_data/pop_dynamics_expt_data.xlsx")
+sheet_pops <- sheet_names[1:5]
+pct_peanut_shells <- c(0, 0.03, 0.05, 0.10, 0.15)
+
+# create new colnames
+npop <- 10
+date_cols <- c("days", "date")
+demo_cols <- unlist(lapply(1:npop,
+       function(i)
+         c(paste0("m_alive_",i),
+           paste0("f_alive_",i),
+           paste0("total_alive_", i),
+           paste0("m_dead_",i),
+           paste0("f_dead_",i),
+           paste0("total_dead_",i))))
+treatment_cols <- c("m_added", "f_added", "pellets", "noclue", "treatment")
+
+# read-in and reformat all population data sheets
+
+list_dfs <- vector("list", length = length(sheet_pops)) # init list to store each df
+
+# loop to read and reformat
+for (i in seq_along(sheet_pops)) {
+  df_now <-
+    read_excel("weevil_data/pop_dynamics_expt_data.xlsx",
+               skip = 3,
+               sheet = sheet_pops[i]) %>%
+    mutate(treatment = pct_peanut_shells[i])
+  
+  # assign new colnames
+  names(df_now) <-
+    c(date_cols, demo_cols, treatment_cols) # should include check to make sure all data sheets have same format
+  
+  # T15 has weird ??? in a col. CHange to NA and convert col to numeric
+  if (i == 5) {
+    df_now$m_alive_8 <-
+      df_now %>% 
+      mutate_at(vars('m_alive_8'), ~na_if(., '???')) %>%
+      pull(m_alive_8) %>%
+      as.numeric()
+  }
+  
+  # make data longer for plotting
+  df_long <- df_now %>%
+    select(-pellets,-noclue) %>% # always 2 pellets a day, and drop noclue as well as the num. added
+    filter(!is.na(days)) %>%  # drop empty bottom two rows (included when reading due to sum(pellets) in spread sheet)
+    pivot_longer(
+      -c(days, date, m_added, f_added,treatment),
+      names_sep = "_",
+      names_to = c("sex", "status", "replicate"),
+      values_to = "count"
+    ) %>%
+    # original data file did not have totals computed for all days
+    # create new df with totals for all days
+    filter(sex != "total" , status == "alive") %>%
+    group_by(date, replicate) %>%
+    mutate(total = sum(count, na.rm = TRUE)) %>% # females were not observed after first few days
+    ungroup()
+  
+  # save to list
+  list_dfs[[i]] <- df_long
+}
+
+full_df <- bind_rows(list_dfs)
+
+full_df <- full_df %>% mutate(replicate = as.numeric(replicate))
+#full_df$treatment <- as_factor(full_df$treatment) # for proper facetting when plotting. Should convert to numeric instead.
+```
+
+```{r clean_for_analysis, warning = FALSE, eval = FALSE}
+# verify that "total" is the same regardless of sex (which wasn't actually distinguished during expt)
+# all.equal( filter(full_df, sex == "m") %>% pull(total), filter(full_df, sex == "f") %>% pull(total) )
+weevil <-
+  full_df %>%
+  filter(sex == "m",  # remove duplicate rows of "total"
+         is.na(m_added)) %>% # Only include data after initialization complete
+  select(days, treatment, replicate, total) %>% # drop all unimportant cols
+  filter(treatment != 0.03) # drop 3 % shell treatment, since it is diff length and was only initialized 20 days instead of 32 like others
+
+# set all "total" values to NA after extinction
+# I will define exinction as the last time the cumulative population total increases
+# e.g., take cumsum for all trt X rep combinations, then get index where cumsum(total) == max(cumsum), set all total values afterwards to NA
+
+weevil <- 
+  weevil %>% 
+  group_by(treatment, replicate) %>%
+  mutate(cumtotal = cumsum(total), 
+         max_cumtotal = max(cumtotal)) %>%
+  rowwise() %>%
+  mutate(last_day = ifelse( (cumtotal == max_cumtotal) && (total == 0), days, NA)) %>%
+  group_by(treatment, replicate) %>%
+  mutate(last_day = min(last_day, na.rm = TRUE)) %>%
+  mutate(total = ifelse(days > last_day, NA, total)) %>%
+  mutate(last_day = ifelse(last_day == Inf, NA, last_day))
+
+# calculate up to lag 5
+weevil <- weevil %>%
+  select(-cumtotal, -max_cumtotal) %>%
+  group_by(replicate, treatment) %>%
+  mutate( N_lag5 = total,
+          N_lag4 = lead(N_lag5),
+          N_lag3 = lead(N_lag4),
+          N_lag2 = lead(N_lag3),
+          N_lag1 = lead(N_lag2),
+          N_lag0 = lead(N_lag1)) %>%
+  filter(!is.na(N_lag0)) %>%
+  # make rep and trt into factor and standardize days 
+  mutate(ftreatment = factor(treatment, levels = c("0", "0.05", "0.1", "0.15")),
+         freplicate = factor(replicate, levels = as.character(1:10)),
+         time = (days - 32)/4,
+         last_day = as.numeric(last_day)) %>%
+  unite(c("ftreatment", "replicate"), col = "rep_trt", remove = FALSE)
+
+write_csv(weevil, "weevil_data/lagged_weevil.csv")
+```
+
+```{r eval = FALSE}
+# example of calcuating lags
+test <- tibble(N = 1:10)
+
+test %>%
+  mutate(N_5 = N,
+         N_4 = lead(N_5),
+         N_3 = lead(N_4),
+         N_2 = lead(N_3),
+         N_1 = lead(N_2),
+         N_0 = lead(N_1)) %>%
+  filter(!is.na(N_0))
+```
+
+```{r define_sim_gomp}
+sim_log_gomp <- function (xinit,     # initial log population size
+                     lambda, # population growth rate,
+                     b,      # density dependence
+                     sd_proc, # process noise: N(0, sd_proc)
+                     tfinal,
+                     nsim,
+                     replicate,
+                     ftreatment) {
+  
+  # init storage list for all simulation
+  sim_list <- vector("list", length = nsim)
+  
+  for (i in seq_along(sim_list)) {
+    # init storage for current simulation
+    log_x <- vector("numeric", length = tfinal)
+    log_x[1] <- xinit
+    
+    # sim population dynamics
+    for (j in 2:tfinal) {
+      proc_error <- rnorm(n = 1, mean = 0, sd = sd_proc)
+      log_x[j] <- lambda + b * log_x[j-1] + proc_error
+    }
+    # save current simulation
+    sim_list[[i]] <- (tidyr::tibble(time = 1:tfinal,
+                                    log_x = log_x,
+                                    N = exp(log_x),
+                                    lambda = lambda,
+                                    b_ = b,
+                                    sd_proc = sd_proc,
+                                    replicate = replicate,
+                                    ftreatment = ftreatment))
+  } 
+  out <- dplyr::bind_rows(sim_list, .id = "sim")
+  return(out)
+}
+```
+
+
+```{r}
+weevil %>%
+  ggplot(aes(x = days, y = N_lag0, group = freplicate)) +
+  geom_line() +
+  facet_wrap(~ftreatment) +
+  labs(title = "Bean weevil abundances",
+       y = "adult weevil abundance",
+       x = "days after treatment began")
+```
+
+# Model
+
+```{r, out.width = "500px"}
+knitr::include_graphics("pics/full_dag.png")
+```
+
+### Definitions
+
+* $n_{ij,t}:$ the adult weevil count for treatment $i$, replicate $j$, and time $t$
+* $n_{ij,t-k:t-1}:$ the adult weevil count for treatment $i$, replicate $j$, and times $t-k,\ldots,t-1$ where $k$ is the largest population lag
+* $z_{ij,t}:$ The expected number of adult weevils for treatment $i$, replicate $j$, and time $t$
+* $\alpha_{ij}:$  treatment specific population growth rate in replicate $j$
+* $\beta_{ijk}:$  effect of previous population size at $t-k$ on expected number of adult weevils at time $t$ for treatment $i$ in replicate $j$
+* $\mu_{\alpha,i}:$ the mean population growth rate for treatment $i$
+* $\mu_{\beta_{ik}}:$ the mean effect of previous population size at $t-k$ on expected number of adult weevils at time $t$ for treatment $i$
+* $\sigma_{\alpha}^2:$ variance of distribution of population growth rates
+* $\sigma_{\beta}^2:$ variance of distribution of density dependence magnitudes (maybe should make it specific to lag $k$?)
+
+### Gompertz process model
+\begin{align}
+N_t & = N_{t-1}\exp(\alpha + \prod_{i=1}^k \beta_i\ln(N_{t-i})) \\
+    & = g(\alpha,\beta_1, \ldots, \beta_k, n_{t-1}, \ldots, n_{t-k}) \\
+\end{align}
+
+But, note that when $N_{t-1}=0$, then all subsequent abundances will be zero.
+
+The log-gompertz model (might?) be more useful for estimation since we no longer multiply by $N_{t-1}$.
+\begin{align}
+X_t & = \alpha +  \prod_{i=1}^k \beta_i\ln(X_{t-i})\\
+    & = g(\alpha,\beta_1, \ldots, \beta_k, n_{t-1}, \ldots, n_{t-k}) \\
+\end{align}
+
+Note that $\beta_1$ in the log-gompertz is technically $(1+\beta_1)$ for the model on arithmetic (not-logged) scale.
+
+### Full model
+
+\begin{align}
+[\boldsymbol{\alpha, \beta, \mu_{\alpha}, \mu_{\beta}},Z, \sigma_{p}^2, \sigma_{\alpha}^2, \sigma_{\beta}^2| \boldsymbol{N}] \propto  
+                                                    \prod_{i=1}^{4} \prod_{j=1}^{J_{ij}} \prod_{k=1}^5 \prod_{t=1}^{T_{ij}} 
+                                                  & \text{Poisson}[n_{ij,t} | Z_{ij,t}]\\
+                                                  & \text{lognormal}(Z_{ij,t} | g(\alpha_{i},\beta_{ik},n_{ij,t-5}, \ldots, n_{ij,t-1}), \sigma_p^2)\\
+                                                  & \text{N}[\alpha_{ij} | \mu_{\alpha,i}, \sigma_{\alpha}^2] \\
+                                                  & \text{N}[\beta_{ijk} | \mu_{\beta_{ik}}, \sigma_{\beta}^2] \\
+                                                  & \text{N}[\mu_{\alpha,i} | 0, 100] \\
+                                                  & \text{N}[\mu_{\beta_{ik}} | 0, 100] \\
+                                                  & \text{inv.gamma}[\sigma_{\alpha}^2 | 0.001, 0.001] \\
+                                                  & \text{inv.gamma}[\sigma_{\beta}^2 | 0.001, 0.001] \\
+\end{align}
+
+# Model fitting
+
+### Model 1
+
+```{r, out.width = "500px"}
+knitr::include_graphics("pics/dag_fixed_trt_proc_error.png")
+```
+
+This model includes fixed effects of different food treatments ($i = 1,\ldots,4$) on population growth rate ($\alpha_i$), strength of direct density dependence ($\beta_i$), and  lognormal process error ($\sigma_p^2$ on log scale).
+
+```{r eval = FALSE, echo = TRUE}
+inits <- 
+  list(
+    list(mu_a = rep(1,4), mu_b = rep(0.5,4), sd_a = 1/5, sd_b = 1/5, sd_p = 0.001),
+    list(mu_a = rep(0.5,4), mu_b = rep(0.2,4), sd_a = 1/10, sd_b = 1/10, sd_p = 0.01),
+    list(mu_a = rep(1.5,4), mu_b = rep(0.9,4), sd_a = 1/100, sd_b = 1/100, sd_p = 0.005)
+  )
+variablenames <- c("mu_a","mu_b", "sd_p")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] ~ dnorm(mu_a[treatment[t]] + mu_b[treatment[t]]*lnlag1[t], 1/sd_p)
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  for (i in 1:4) { # one draw for each treatment level
+      mu_a[i] ~ dunif(0,3)
+      mu_b[i] ~ dunif(-1.1, 1.1)
+  }
+  sd_p ~ dunif(0, 0.5) # same process error across treatments
+}"
+
+jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
+save(cs, file = "chains/weevil_fixed_trt_proc_error.RData")
+```
+
+```{r}
+load("chains/weevil_fixed_trt_proc_error.RData")
+mcmc_trace(cs)
+```
+
+The chains appear to have converged on the target distribution but there is autocorrelation for some of the treatment levels.
+
+```{r}
+gelman.plot(cs)
+```
+
+The Gelman-Rubin indicate that the chains have converged.
+
+```{r}
+mcmc_dens_overlay(cs)
+```
+
+```{r}
+mcmc_acf(cs)
+```
+
+SInce there the chains have high autocorrelation, I think I need to run the models for more iterations to average over fluctuations. HOwever, it isn't clear to me how many iterations are necessary to accomplish that.
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
+The paramter estimates I've obtained are different than what I estimated previously using a model that also had the same fixed effects structure but was fit by least squares on the log-scale and had treatment specific process noise (below). 
+
+```{r}
+ls_estimates <- structure(list(coefficient = c("l_total", "ftreatment0", "ftreatment0.05", 
+"ftreatment0.1", "ftreatment0.15", "l_total:ftreatment0.05", 
+"l_total:ftreatment0.1", "l_total:ftreatment0.15", NA, NA, NA, 
+NA), lower = structure(c(0.522307895589936, 0.990489589747571, 
+0.300050483617499, 0.157993134164124, 0.0805080146063129, 0.191822296417957, 
+0.172331101718854, 0.0274039716229825, 0.274283666423165, 0.440809355907049, 
+0.48977796163462, 0.45148897456265), label = "Coefficients:"), 
+    est. = structure(c(0.567864680970375, 1.10839692670398, 0.375639912987038, 
+    0.241069278705585, 0.201302042793643, 0.248795947159279, 
+    0.239244087756836, 0.130973671120131, 0.285110449826913, 
+    0.484746604179644, 0.545132801201995, 0.521134688251478), label = "Coefficients:"), 
+    upper = structure(c(0.613421466350814, 1.22630426366039, 
+    0.451229342356576, 0.324145423247047, 0.322096070980974, 
+    0.305769597900601, 0.306157073794818, 0.234543370617279, 
+    0.296364598229825, 0.533063255384365, 0.606743859920807, 
+    0.601523799251227), label = "Coefficients:"), parameter_sym = c("b", 
+    "a", "a", "a", "a", "b", "b", "b", NA, NA, NA, NA), parameter = c("density dependence (b)", 
+    "population growth rate (a)", "population growth rate (a)", 
+    "population growth rate (a)", "population growth rate (a)", 
+    "density dependence (b)", "density dependence (b)", "density dependence (b)", 
+    "process noise (sd)", "process noise (sd)", "process noise (sd)", 
+    "process noise (sd)"), treatment = structure(c(1L, 1L, 2L, 
+    3L, 4L, 2L, 3L, 4L, 1L, 2L, 3L, 4L), .Label = c("0", "0.05", 
+    "0.1", "0.15"), class = "factor"), `estimate (95 % CI)` = c("0.57  ( 0.52 ,  0.61 )", 
+    "1.11  ( 0.99 ,  1.23 )", "0.38  ( 0.3 ,  0.45 )", "0.24  ( 0.16 ,  0.32 )", 
+    "0.2  ( 0.08 ,  0.32 )", "0.25  ( 0.19 ,  0.31 )", "0.24  ( 0.17 ,  0.31 )", 
+    "0.13  ( 0.03 ,  0.23 )", "0.29  ( 0.27 ,  0.3 )", "0.48  ( 0.44 ,  0.53 )", 
+    "0.55  ( 0.49 ,  0.61 )", "0.52  ( 0.45 ,  0.6 )")), row.names = c(NA, 
+-12L), class = c("tbl_df", "tbl", "data.frame"))
+ls_estimates %>% 
+  select(treatment, parameter, `estimate (95 % CI)`) %>%
+  pivot_wider(names_from = parameter, values_from = `estimate (95 % CI)`) %>%
+  knitr::kable(caption = "Parameter estimates from previous model: treatment specific variance")
+```
+
+
+### Model 2
+
+```{r, out.width = "500px"}
+knitr::include_graphics("pics/dag_random_trt_no_proc.png")
+```
+
+
+I fit a random effect of treatment, no process error, and direct density dependence ($k = 1$). This model draws $\alpha_{ij}$ and $\beta_{ij}$ from some treatment specific distribution of values which reflects variation among replicates within each treatment.
+
+
+```{r eval = FALSE, echo = TRUE}
+#set.seed(123)
+data <- 
+  list(
+  n = as.numeric(weevil$N_lag0),
+  lag1 = as.numeric(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  lnlag1 = log(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  replicate = as.numeric(weevil$replicate), # nx1 vector of replicate numbers for each observation
+  sreplicate = as.numeric(1:10), # replicate numbers
+  treatment = as.numeric(weevil$ftreatment), # nx1 vector of treatment levels for each observation
+  streatment = as.numeric(1:4) # treatment levels
+)
+
+# inits <- 
+#   list(
+#     list(mu_a = matrix(1,nrow = 4, ncol = 10), mu_b = matrix(0.5,nrow = 4, ncol = 10), sd_a = 1/5, sd_b = 1/5),
+#     list(mu_a = matrix(0.5,nrow = 4, ncol = 10), mu_b = matrix(0.2,nrow = 4, ncol = 10), sd_a = 1/10, sd_b = 1/10),
+#     list(mu_a = matrix(1.5,nrow = 4, ncol = 10), mu_b = matrix(0.9,nrow = 4, ncol = 10), sd_a = 1/100, sd_b = 1/100)
+#   )
+inits <-
+  list(
+    list(mu_a = rep(1, 4), mu_b = rep(0.5, 4), sd_a = 1/5, sd_b = 1/5),
+    list(mu_a = rep(0.5, 4), mu_b = rep(0.2, 4), sd_a = 1/10, sd_b = 1/10),
+    list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), sd_a = 1/100, sd_b = 1/100)
+  )
+
+variablenames <- c("mu_a","mu_b", "sd_a","sd_b")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] <- a[treatment[t], replicate[t]] + b[treatment[t], replicate[t]]*lnlag1[t]
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  for (i in 1:length(streatment)) {
+  for (j in 1:length(sreplicate)) {
+      a[i, j] ~ dnorm(mu_a[i], 1/sd_a)
+      b[i, j] ~ dnorm(mu_b[i], 1/sd_b)
+  }
+  }
+  # prior for mean a and b
+  for (i in 1:length(streatment)) {
+      mu_a[i] ~ dunif(0,3)
+      mu_b[i] ~ dunif(-1.1, 1.1)
+  }
+
+  # prior for sd
+  sd_a ~ dgamma(0.001, 0.001)
+  sd_b ~ dgamma(0.001, 0.001)
+}"
+
+jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
+#save(cs, file = "chains/weevil_random_trt_no_proc_weird.RData")
+``` 
+>Error in update.jags(model, n.iter, ...) : Error in node a[4,10]
+Slicer stuck at value with infinite density
+
+I got this error after trying to rerun this model. Not sure what I need to adjust to protect against this.
+
+```{r}
+load("chains/weevil_random_trt_no_proc.RData")
+mcmc_trace(cs)
+```
+
+
+```{r}
+gelman.plot(cs)
+```
+
+```{r}
+mcmc_dens_overlay(cs)
+```
+
+```{r}
+mcmc_acf(cs)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
+Why are the standard deviations $\sigma_\alpha, \sigma_\beta$ preposterously large? 
+
+Is it because one of the elements of the mu_a and mu_b matrices doesn't actually have data to inform it since replicate 8 for treatment 4 (15 % shell) was to be included in the analysis? **Nevermind, I just specified them as tau instead of sd.**
+
+### Model 3
+
+This is the full model presented earlier with direct density dependence only. It differs from the model 2 since I include process error.
+
+```{r eval = FALSE, echo = TRUE}
+set.seed(123)
+data <- 
+  list(
+  n = as.numeric(weevil$N_lag0),
+  lag1 = as.numeric(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  lnlag1 = log(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  replicate = as.numeric(weevil$replicate), # nx1 vector of replicate numbers for each observation
+  sreplicate = as.numeric(1:10), # replicate numbers
+  treatment = as.numeric(weevil$ftreatment), # nx1 vector of treatment levels for each observation
+  streatment = as.numeric(1:4) # treatment levels
+)
+
+# inits <- 
+#   list(
+#     list(mu_a = matrix(1,nrow = 4, ncol = 10), mu_b = matrix(0.5,nrow = 4, ncol = 10), sd_a = 1/5, sd_b = 1/5),
+#     list(mu_a = matrix(0.5,nrow = 4, ncol = 10), mu_b = matrix(0.2,nrow = 4, ncol = 10), sd_a = 1/10, sd_b = 1/10),
+#     list(mu_a = matrix(1.5,nrow = 4, ncol = 10), mu_b = matrix(0.9,nrow = 4, ncol = 10), sd_a = 1/100, sd_b = 1/100)
+#   )
+inits <-
+  list(
+    list(mu_a = rep(1, 4), mu_b = rep(0.5, 4), tau_a = 1/5, tau_b = 1/5, tau_p = 0.001),
+    list(mu_a = rep(0.5, 4), mu_b = rep(0.2, 4), tau_a = 1/10, tau_b = 1/10, tau_p = 0.01),
+    list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), tau_a = 1/100, tau_b = 1/100, tau_p = 0.005)
+  )
+
+variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] ~ dnorm(a[treatment[t], replicate[t]] + b[treatment[t], replicate[t]]*lnlag1[t], tau_p)
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  for (i in 1:length(streatment)) {
+  for (j in 1:length(sreplicate)) {
+      a[i, j] ~ dnorm(mu_a[i], tau_a)
+      b[i, j] ~ dnorm(mu_b[i], tau_b)
+  }
+  }
+  # prior for mean a and b
+  for (i in 1:length(streatment)) {
+      mu_a[i] ~ dunif(0,3)
+      mu_b[i] ~ dunif(-1.1, 1.1)
+  }
+
+  # prior for sd
+  tau_a ~ dgamma(0.001, 0.001)
+  tau_b ~ dgamma(0.001, 0.001)
+  tau_p ~ dunif(0, 0.5) # same process error across treatments
+
+  # get sd
+  sd_a <- 1/sqrt(tau_a)
+  sd_b <- 1/sqrt(tau_b)
+  sd_p <- 1/sqrt(tau_p)
+}"
+
+jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
+#save(cs, file = "chains/weevil_random_trt_proc_error_weird.RData")
+``` 
+
+The first time I fit the full model, I accidently misspecified the precision as the standard error. Other than having "sd" estimates that were wrong, the fit seemed fine (all plots on left hand side). I fixed the error and estimated sd correctly. However, now the chains have really odd behavior (plots on right hand side). I'm not sure why there would be such a massive difference from run-to-run.
+
+```{r out.width="50%", fig.show="hold"}
+load("chains/weevil_random_trt_proc_error_weird.RData")
+cs_weird <- cs
+load("chains/weevil_random_trt_proc_error.RData")
+mcmc_trace(cs)
+mcmc_trace(cs_weird)
+```
+
+
+```{r out.width="50%", fig.show="hold"}
+gelman.plot(cs)
+gelman.plot(cs_weird)
+```
+
+On one of the runs, the chains appeard to converge (left) although there was still autocorrelation in the chains. However, on another run, it doesn't even look like the chains converged (right) and the chains were getting stuck.
+
+```{r out.width="50%", fig.show="hold"}
+mcmc_dens_overlay(cs)
+mcmc_dens_overlay(cs_weird)
+```
+
+```{r out.width="50%", fig.show="hold"}
+mcmc_acf(cs)
+mcmc_acf(cs_weird)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+MCMCsummary(cs_weird) %>% knitr::kable(digits = 2)
+```
+
+```{r eval = FALSE}
+rbind(cs[[1]],cs[[2]],cs[[3]]) %>% as_tibble() %>%
+  mutate(tau_a = sd_a,
+         tau_b = sd_b,
+         sd_a = 1/sqrt(tau_a),
+         sd_b = 1/sqrt(tau_b)) %>%
+  summarise(sd_a = mean(sd_a),
+            sd_b = mean(sd_b))
+```
+
+
+```{r}
+knitr::knit_exit()
+```
+
+# nope
+
+```{r}
+weevil_0 <- 
+  weevil %>% 
+  filter(treatment == 0) %>% 
+  arrange(freplicate)
+
+data_pure <- 
+  list(
+  n = as.numeric(weevil_0$N_lag0),
+  lag1 = as.numeric(ifelse(weevil_0$N_lag1 == 0, 0.001, weevil_0$N_lag1)),
+  lnlag1 = log(ifelse(weevil_0$N_lag1 == 0, 0.001, weevil_0$N_lag1)),
+  replicate = as.numeric(weevil_0$replicate),
+  sreplicate = as.numeric(1:10)
+)
+```
+
+### model 1. with lognormal process errors and random a and b
+
+```{r pure_weevil_proc_error, eval = FALSE, echo = TRUE}
+inits <- 
+  list(
+    list(mu_a = 1, mu_b = 0.5, tau_a = 1/5, tau_b = 1/5, tau_p = 1/5),
+    list(mu_a = 0.5, mu_b = 0.2, tau_a = 1/10, tau_b = 1/10, tau_p = 1/10),
+    list(mu_a = 1.5, mu_b = 0.9, tau_a = 1/100, tau_b = 1/100, tau_p = 1/100)
+  )
+
+variablenames <- c("mu_a","mu_b","tau_a","tau_b", "tau_p","sd_a","sd_b", "sd_p")
+#variablenames <- c("mu_a","mu_b","tau_a","tau_b", "tau_p","sd_a","sd_b")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] ~ dnorm( a[replicate[t]] + b[replicate[t]]*lnlag1[t], tau_p ) # process error
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors for mean of coefficients
+  mu_a ~ dnorm(0,0.0001)
+  mu_b ~ dnorm(0,0.0001)
+
+  # priors for precisions
+  tau_a ~ dgamma(0.0001,0.0001)
+  tau_b ~ dgamma(0.0001,0.0001)
+  tau_p ~ dgamma(0.0001,0.0001)
+
+  # draw values for a and b
+  for (i in 1:length(sreplicate)) {
+    a[i] ~ dnorm(mu_a, tau_a)
+    b[i] ~ dnorm(mu_b, tau_b)
+  }
+
+  # convert precision to sd
+  sd_a <- 1/sqrt(tau_a)
+  sd_b <- 1/sqrt(tau_b)
+  sd_p <- 1/sqrt(tau_p)
+}"
+
+jm = jags.model(textConnection(modelstring),data_pure,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
+
+# save chains
+save(cs, file = "chains/weevil_0_full.RData")
+```
+
+```{r}
+load("chains/weevil_0_full.RData")
+mcmc_trace(cs, pars = c("mu_a", "mu_b", "sd_a", "sd_b", "sd_p"))
+mcmc_dens_overlay(cs, c("mu_a", "mu_b", "sd_a", "sd_b", "sd_p"))
+gelman.plot(cs)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
+
+### model 2. random a and b and without process errors 
+
+```{r pure_weevil_no_proc, eval = FALSE, echo = TRUE}
+inits <- 
+  list(
+    list(mu_a = 1, mu_b = 0.5, tau_a = 1/5, tau_b = 1/5),
+    list(mu_a = 0.5, mu_b = 0.2, tau_a = 1/10, tau_b = 1/10),
+    list(mu_a = 1.5, mu_b = 0.9, tau_a = 1/100, tau_b = 1/100)
+  )
+
+#variablenames <- c("mu_a","mu_b","tau_a","tau_b", "tau_p","sd_a","sd_b", "sd_p")
+variablenames <- c("mu_a","mu_b","tau_a","tau_b", "tau_p","sd_a","sd_b")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    #z[t] ~ dlnorm( log(lag1[t]*exp(a[replicate[t]] + b[replicate[t]]*lnlag1[t])), tau_p )
+    #z[t] ~ dnorm( a[replicate[t]] + b[replicate[t]]*lnlag1[t], tau_p ) # process error
+    z[t] <- a[replicate[t]] + b[replicate[t]]*lnlag1[t] # no process error
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors for mean of coefficients
+  mu_a ~ dnorm(0,0.0001)
+  mu_b ~ dnorm(0,0.0001)
+
+  # priors for precisions
+  tau_a ~ dgamma(0.0001,0.0001)
+  tau_b ~ dgamma(0.0001,0.0001)
+  #tau_p ~ dgamma(0.0001,0.0001)
+
+  # draw values for a and b
+  for (i in 1:length(sreplicate)) {
+    a[i] ~ dnorm(mu_a, tau_a)
+    b[i] ~ dnorm(mu_b, tau_b)
+  }
+
+  # convert precision to sd
+  sd_a <- 1/sqrt(tau_a)
+  sd_b <- 1/sqrt(tau_b)
+  #sd_p <- 1/sqrt(tau_p)
+}"
+
+jm = jags.model(textConnection(modelstring),data_pure,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=1000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=20000) #generate chains
+
+# save chains
+save(cs, file = "chains/weevil_0_no_proc.RData")
+```
+
+```{r}
+load("chains/weevil_0_no_proc.RData")
+mcmc_trace(cs, pars = c("mu_a","mu_b","sd_a","sd_b"))
+mcmc_dens_overlay(cs, c("mu_a", "mu_b", "sd_a", "sd_b"))
+gelman.plot(cs)
+```
+
+```{r}
+MCMCsummary(cs, params = c("mu_a", "mu_b", "sd_a", "sd_b")) %>% knitr::kable(digits = 2)
+```
+
+
+```{r eval = FALSE}
+caterplot(cs, parms = "mu")
+caterplot(cs, parms = "sd")
+```
+
+
+```{r eval = FALSE}
+cs_pure <- rbind(cs[[1]],cs[[2]],cs[[3]])
+pars_pure <- colMeans(cs_pure)
+pars_pure %>% knitr::kable()
+```
+
+```{r}
+# get initial pop sizes
+init_pure <- weevil_0 %>% group_by(replicate) %>% slice(1) %>% pull(N_lag0)
+
+```
+
+
+```{r eval = FALSE}
+MCMCtrace(cs, pdf = FALSE)
+```
+
+```{r eval = FALSE}
+MCMCplot(cs)
+```
+
+### model 3. with random a and b, no proc error, and uniform priors
+
+```{r weevil_pure_random_coef, eval = FALSE, echo = TRUE}
+inits <- 
+  list(
+    list(mu_a = 1, mu_b = 0.5, sd_a = 1/5, sd_b = 1/5),
+    list(mu_a = 0.5, mu_b = 0.2, sd_a = 1/10, sd_b = 1/10),
+    list(mu_a = 1.5, mu_b = 0.9, sd_a = 1/100, sd_b = 1/100)
+  )
+variablenames <- c("mu_a","mu_b","sd_a","sd_b","sd_p")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] <- a[replicate[t]] + b[replicate[t]]*lnlag1[t]
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  mu_a ~ dunif(0,3)
+  mu_b ~ dunif(-1.1, 1.1)
+  sd_a ~ dunif(0,0.5)
+  sd_b ~ dunif(0,0.5)
+
+  # draw values for a and b
+  for (i in 1:length(sreplicate)) {
+      a[i] ~ dnorm(mu_a,1/sd_a)
+      b[i] ~ dnorm(mu_b,1/sd_b)
+  }
+}"
+
+jm = jags.model(textConnection(modelstring),data_pure,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=20000) #generate chains
+save(cs, file = "chains/weevil_0_simple.RData")
+```
+
+```{r}
+load("chains/weevil_0_simple.RData")
+mcmc_trace(cs, pars = c("mu_a", "mu_b", "sd_a", "sd_b"))
+mcmc_dens_overlay(cs, c("mu_a", "mu_b", "sd_a", "sd_b"))
+gelman.plot(cs)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
+
+### model 4. with fixed a and b, no process noise, uniform priors
+
+```{r weevil_pure_simplest, eval = FALSE, echo = TRUE}
+inits <- 
+  list(
+    list(mu_a = 1, mu_b = 0.5, sd_a = 1/5, sd_b = 1/5),
+    list(mu_a = 0.5, mu_b = 0.2, sd_a = 1/10, sd_b = 1/10),
+    list(mu_a = 1.5, mu_b = 0.9, sd_a = 1/100, sd_b = 1/100)
+  )
+variablenames <- c("mu_a","mu_b")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] <- mu_a + mu_b*lnlag1[t]
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  mu_a ~ dunif(0,3)
+  mu_b ~ dunif(-1.1, 1.1)
+}"
+
+jm = jags.model(textConnection(modelstring),data_pure,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=20000) #generate chains
+save(cs, file = "chains/weevil_0_simplest.RData")
+```
+
+```{r}
+load("chains/weevil_0_simplest.RData")
+mcmc_trace(cs, pars = c("mu_a", "mu_b"))
+mcmc_dens_overlay(cs, c("mu_a", "mu_b"))
+gelman.plot(cs)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
+### Fitting all treatments
+
+```{r}
+weevil <- 
+  weevil %>% 
+  mutate(freptrt = ftreatment:freplicate) %>%
+  #mutate(frep_trt = factor(rep_trt)) %>% pull(frep_trt) %>% levels()
+  arrange(freptrt)
+
+data <- 
+  list(
+  n = as.numeric(weevil$N_lag0),
+  lag1 = as.numeric(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  lnlag1 = log(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  replicate = as.numeric(weevil$replicate),
+  sreplicate = as.numeric(1:10),
+  treatment = as.numeric(weevil$ftreatment),
+  streatment = as.numeric(1:4)
+)
+```
+
+
+### No process error, fixed effect of $a_i$ and $b_i$
+```{r eval = FALSE}
+inits <- 
+  list(
+    list(mu_a = rep(1,4), mu_b = rep(0.5,4), sd_a = 1/5, sd_b = 1/5),
+    list(mu_a = rep(0.5,4), mu_b = rep(0.2,4), sd_a = 1/10, sd_b = 1/10),
+    list(mu_a = rep(1.5,4), mu_b = rep(0.9,4), sd_a = 1/100, sd_b = 1/100)
+  )
+variablenames <- c("mu_a","mu_b")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] <- mu_a[treatment[t]] + mu_b[treatment[t]]*lnlag1[t]
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  for (i in 1:4) {
+      mu_a[i] ~ dunif(0,3)
+      mu_b[i] ~ dunif(-1.1, 1.1)
+  }
+}"
+
+jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
+save(cs, file = "chains/weevil_fixed_trt")
+```
+
+```{r}
+load("chains/weevil_fixed_trt")
+mcmc_trace(cs)
+mcmc_dens_overlay(cs)
+gelman.plot(cs)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
