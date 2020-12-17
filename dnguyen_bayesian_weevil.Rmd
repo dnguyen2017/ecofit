@@ -253,13 +253,160 @@ Note that $\beta_1$ in the log-gompertz is technically $(1+\beta_1)$ for the mod
                                                   & \text{lognormal}(Z_{ij,t} | g(\alpha_{i},\beta_{ik},n_{ij,t-5}, \ldots, n_{ij,t-1}), \sigma_p^2)\\
                                                   & \text{N}[\alpha_{ij} | \mu_{\alpha,i}, \sigma_{\alpha}^2] \\
                                                   & \text{N}[\beta_{ijk} | \mu_{\beta_{ik}}, \sigma_{\beta}^2] \\
-                                                  & \text{N}[\mu_{\alpha,i} | 0, 100] \\
-                                                  & \text{N}[\mu_{\beta_{ik}} | 0, 100] \\
+                                                  & \text{Unif}[\mu_{\alpha,i} | 0, 3] \\
+                                                  & \text{Unif}[\mu_{\beta_{ik}} | -1.1, 1.1] \\
                                                   & \text{inv.gamma}[\sigma_{\alpha}^2 | 0.001, 0.001] \\
                                                   & \text{inv.gamma}[\sigma_{\beta}^2 | 0.001, 0.001] \\
 \end{align}
 
-# Model fitting
+# Model fitting: Direct density dependence
+
+This is the full model presented earlier with direct density dependence only ($k=1$).
+
+```{r eval = FALSE, echo = TRUE}
+set.seed(123)
+data <- 
+  list(
+  n = as.numeric(weevil$N_lag0),
+  lag1 = as.numeric(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  lnlag1 = log(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
+  replicate = as.numeric(weevil$replicate), # nx1 vector of replicate numbers for each observation
+  sreplicate = as.numeric(1:10), # replicate numbers
+  treatment = as.numeric(weevil$ftreatment), # nx1 vector of treatment levels for each observation
+  streatment = as.numeric(1:4) # treatment levels
+)
+
+inits <-
+  list(
+    list(mu_a = rep(1, 4), mu_b = rep(0.5, 4), tau_a = 1/5, tau_b = 1/5, tau_p = 0.001),
+    list(mu_a = rep(0.5, 4), mu_b = rep(0.2, 4), tau_a = 1/10, tau_b = 1/10, tau_p = 0.01),
+    list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), tau_a = 1/100, tau_b = 1/100, tau_p = 0.005)
+  )
+
+variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")
+modelstring="
+model{
+  #likelihood
+  for (t in 1:length(n)){
+    z[t] ~ dnorm(a[treatment[t], replicate[t]] + b[treatment[t], replicate[t]]*lnlag1[t], tau_p)
+    n[t] ~ dpois(exp(z[t]))
+  }
+  
+  # priors
+  for (i in 1:length(streatment)) {
+  for (j in 1:length(sreplicate)) {
+      a[i, j] ~ dnorm(mu_a[i], tau_a)
+      b[i, j] ~ dnorm(mu_b[i], tau_b)
+  }
+  }
+  # prior for mean a and b
+  for (i in 1:length(streatment)) {
+      mu_a[i] ~ dunif(0,3)
+      mu_b[i] ~ dunif(-1.1, 1.1)
+  }
+
+  # prior for sd
+  tau_a ~ dgamma(0.001, 0.001)
+  tau_b ~ dgamma(0.001, 0.001)
+  tau_p ~ dgamma(0.001, 0.001) # same process error across treatments
+
+  # get sd
+  sd_a <- 1/sqrt(tau_a)
+  sd_b <- 1/sqrt(tau_b)
+  sd_p <- 1/sqrt(tau_p)
+
+  # Derived quantity
+  for (i in 1:4) {
+    K[i] <- exp(mu_a[i]/(1-mu_b[i]))
+  }
+}"
+
+jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
+update(jm, n.iter=10000) #burn-in
+cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
+#save(cs, file = "chains/weevil_random_trt_proc_error.RData")
+``` 
+
+### Checking convergence
+
+```{r trace_plots}
+load("chains/weevil_random_trt_proc_error.RData")
+mcmc_trace(cs)
+```
+
+```{r gr_plots}
+gelman.plot(cs)
+```
+
+```{r dens_chain}
+mcmc_dens_overlay(cs)
+```
+
+```{r acf_chain}
+mcmc_acf(cs)
+```
+
+```{r}
+MCMCsummary(cs) %>% knitr::kable(digits = 2)
+```
+
+### Model Checking
+
+### Inferences
+
+```{r}
+ls_estimates <- structure(list(coefficient = c("l_total", "ftreatment0", "ftreatment0.05", 
+"ftreatment0.1", "ftreatment0.15", "l_total:ftreatment0.05", 
+"l_total:ftreatment0.1", "l_total:ftreatment0.15", NA, NA, NA, 
+NA), lower = structure(c(0.522307895589936, 0.990489589747571, 
+0.300050483617499, 0.157993134164124, 0.0805080146063129, 0.191822296417957, 
+0.172331101718854, 0.0274039716229825, 0.274283666423165, 0.440809355907049, 
+0.48977796163462, 0.45148897456265), label = "Coefficients:"), 
+    est. = structure(c(0.567864680970375, 1.10839692670398, 0.375639912987038, 
+    0.241069278705585, 0.201302042793643, 0.248795947159279, 
+    0.239244087756836, 0.130973671120131, 0.285110449826913, 
+    0.484746604179644, 0.545132801201995, 0.521134688251478), label = "Coefficients:"), 
+    upper = structure(c(0.613421466350814, 1.22630426366039, 
+    0.451229342356576, 0.324145423247047, 0.322096070980974, 
+    0.305769597900601, 0.306157073794818, 0.234543370617279, 
+    0.296364598229825, 0.533063255384365, 0.606743859920807, 
+    0.601523799251227), label = "Coefficients:"), parameter_sym = c("b", 
+    "a", "a", "a", "a", "b", "b", "b", NA, NA, NA, NA), parameter = c("density dependence (b)", 
+    "population growth rate (a)", "population growth rate (a)", 
+    "population growth rate (a)", "population growth rate (a)", 
+    "density dependence (b)", "density dependence (b)", "density dependence (b)", 
+    "process noise (sd)", "process noise (sd)", "process noise (sd)", 
+    "process noise (sd)"), treatment = structure(c(1L, 1L, 2L, 
+    3L, 4L, 2L, 3L, 4L, 1L, 2L, 3L, 4L), .Label = c("0", "0.05", 
+    "0.1", "0.15"), class = "factor"), `estimate (95 % CI)` = c("0.57  ( 0.52 ,  0.61 )", 
+    "1.11  ( 0.99 ,  1.23 )", "0.38  ( 0.3 ,  0.45 )", "0.24  ( 0.16 ,  0.32 )", 
+    "0.2  ( 0.08 ,  0.32 )", "0.25  ( 0.19 ,  0.31 )", "0.24  ( 0.17 ,  0.31 )", 
+    "0.13  ( 0.03 ,  0.23 )", "0.29  ( 0.27 ,  0.3 )", "0.48  ( 0.44 ,  0.53 )", 
+    "0.55  ( 0.49 ,  0.61 )", "0.52  ( 0.45 ,  0.6 )")), row.names = c(NA, 
+-12L), class = c("tbl_df", "tbl", "data.frame"))
+ls_estimates %>% 
+  select(treatment, parameter, `estimate (95 % CI)`) %>%
+  pivot_wider(names_from = parameter, values_from = `estimate (95 % CI)`) %>%
+  knitr::kable(caption = "Parameter estimates from previous model: treatment specific variance")
+```
+
+
+```{r eval = FALSE}
+rbind(cs[[1]],cs[[2]],cs[[3]]) %>% as_tibble() %>%
+  mutate(tau_a = sd_a,
+         tau_b = sd_b,
+         sd_a = 1/sqrt(tau_a),
+         sd_b = 1/sqrt(tau_b)) %>%
+  summarise(sd_a = mean(sd_a),
+            sd_b = mean(sd_b))
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+# nope
+
 
 ### Model 1
 
@@ -327,43 +474,6 @@ MCMCsummary(cs) %>% knitr::kable(digits = 2)
 ```
 
 The paramter estimates I've obtained are different than what I estimated previously using a model that also had the same fixed effects structure but was fit by least squares on the log-scale and had treatment specific process noise (below). 
-
-```{r}
-ls_estimates <- structure(list(coefficient = c("l_total", "ftreatment0", "ftreatment0.05", 
-"ftreatment0.1", "ftreatment0.15", "l_total:ftreatment0.05", 
-"l_total:ftreatment0.1", "l_total:ftreatment0.15", NA, NA, NA, 
-NA), lower = structure(c(0.522307895589936, 0.990489589747571, 
-0.300050483617499, 0.157993134164124, 0.0805080146063129, 0.191822296417957, 
-0.172331101718854, 0.0274039716229825, 0.274283666423165, 0.440809355907049, 
-0.48977796163462, 0.45148897456265), label = "Coefficients:"), 
-    est. = structure(c(0.567864680970375, 1.10839692670398, 0.375639912987038, 
-    0.241069278705585, 0.201302042793643, 0.248795947159279, 
-    0.239244087756836, 0.130973671120131, 0.285110449826913, 
-    0.484746604179644, 0.545132801201995, 0.521134688251478), label = "Coefficients:"), 
-    upper = structure(c(0.613421466350814, 1.22630426366039, 
-    0.451229342356576, 0.324145423247047, 0.322096070980974, 
-    0.305769597900601, 0.306157073794818, 0.234543370617279, 
-    0.296364598229825, 0.533063255384365, 0.606743859920807, 
-    0.601523799251227), label = "Coefficients:"), parameter_sym = c("b", 
-    "a", "a", "a", "a", "b", "b", "b", NA, NA, NA, NA), parameter = c("density dependence (b)", 
-    "population growth rate (a)", "population growth rate (a)", 
-    "population growth rate (a)", "population growth rate (a)", 
-    "density dependence (b)", "density dependence (b)", "density dependence (b)", 
-    "process noise (sd)", "process noise (sd)", "process noise (sd)", 
-    "process noise (sd)"), treatment = structure(c(1L, 1L, 2L, 
-    3L, 4L, 2L, 3L, 4L, 1L, 2L, 3L, 4L), .Label = c("0", "0.05", 
-    "0.1", "0.15"), class = "factor"), `estimate (95 % CI)` = c("0.57  ( 0.52 ,  0.61 )", 
-    "1.11  ( 0.99 ,  1.23 )", "0.38  ( 0.3 ,  0.45 )", "0.24  ( 0.16 ,  0.32 )", 
-    "0.2  ( 0.08 ,  0.32 )", "0.25  ( 0.19 ,  0.31 )", "0.24  ( 0.17 ,  0.31 )", 
-    "0.13  ( 0.03 ,  0.23 )", "0.29  ( 0.27 ,  0.3 )", "0.48  ( 0.44 ,  0.53 )", 
-    "0.55  ( 0.49 ,  0.61 )", "0.52  ( 0.45 ,  0.6 )")), row.names = c(NA, 
--12L), class = c("tbl_df", "tbl", "data.frame"))
-ls_estimates %>% 
-  select(treatment, parameter, `estimate (95 % CI)`) %>%
-  pivot_wider(names_from = parameter, values_from = `estimate (95 % CI)`) %>%
-  knitr::kable(caption = "Parameter estimates from previous model: treatment specific variance")
-```
-
 
 ### Model 2
 
@@ -473,129 +583,6 @@ Why are the standard deviations $\sigma_\alpha, \sigma_\beta$ preposterously lar
 
 Is it because one of the elements of the mu_a and mu_b matrices doesn't actually have data to inform it since replicate 8 for treatment 4 (15 % shell) was to be included in the analysis? **Nevermind, I just specified them as tau instead of sd.**
 
-### Model 3
-
-This is the full model presented earlier with direct density dependence only. It differs from the model 2 since I include process error.
-
-```{r eval = FALSE, echo = TRUE}
-set.seed(123)
-data <- 
-  list(
-  n = as.numeric(weevil$N_lag0),
-  lag1 = as.numeric(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
-  lnlag1 = log(ifelse(weevil$N_lag1 == 0, 0.001, weevil$N_lag1)),
-  replicate = as.numeric(weevil$replicate), # nx1 vector of replicate numbers for each observation
-  sreplicate = as.numeric(1:10), # replicate numbers
-  treatment = as.numeric(weevil$ftreatment), # nx1 vector of treatment levels for each observation
-  streatment = as.numeric(1:4) # treatment levels
-)
-
-# inits <- 
-#   list(
-#     list(mu_a = matrix(1,nrow = 4, ncol = 10), mu_b = matrix(0.5,nrow = 4, ncol = 10), sd_a = 1/5, sd_b = 1/5),
-#     list(mu_a = matrix(0.5,nrow = 4, ncol = 10), mu_b = matrix(0.2,nrow = 4, ncol = 10), sd_a = 1/10, sd_b = 1/10),
-#     list(mu_a = matrix(1.5,nrow = 4, ncol = 10), mu_b = matrix(0.9,nrow = 4, ncol = 10), sd_a = 1/100, sd_b = 1/100)
-#   )
-inits <-
-  list(
-    list(mu_a = rep(1, 4), mu_b = rep(0.5, 4), tau_a = 1/5, tau_b = 1/5, tau_p = 0.001),
-    list(mu_a = rep(0.5, 4), mu_b = rep(0.2, 4), tau_a = 1/10, tau_b = 1/10, tau_p = 0.01),
-    list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), tau_a = 1/100, tau_b = 1/100, tau_p = 0.005)
-  )
-
-variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")
-modelstring="
-model{
-  #likelihood
-  for (t in 1:length(n)){
-    z[t] ~ dnorm(a[treatment[t], replicate[t]] + b[treatment[t], replicate[t]]*lnlag1[t], tau_p)
-    n[t] ~ dpois(exp(z[t]))
-  }
-  
-  # priors
-  for (i in 1:length(streatment)) {
-  for (j in 1:length(sreplicate)) {
-      a[i, j] ~ dnorm(mu_a[i], tau_a)
-      b[i, j] ~ dnorm(mu_b[i], tau_b)
-  }
-  }
-  # prior for mean a and b
-  for (i in 1:length(streatment)) {
-      mu_a[i] ~ dunif(0,3)
-      mu_b[i] ~ dunif(-1.1, 1.1)
-  }
-
-  # prior for sd
-  tau_a ~ dgamma(0.001, 0.001)
-  tau_b ~ dgamma(0.001, 0.001)
-  tau_p ~ dgamma(0.001, 0.001) # same process error across treatments
-
-  # get sd
-  sd_a <- 1/sqrt(tau_a)
-  sd_b <- 1/sqrt(tau_b)
-  sd_p <- 1/sqrt(tau_p)
-
-  # Derived quantity
-  for (i in 1:4) {
-    K[i] <- exp(mu_a[i]/(1-mu_b[i]))
-  }
-}"
-
-jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
-update(jm, n.iter=10000) #burn-in
-cs = coda.samples(jm,variable.names = variablenames,n.iter=20000) #generate chains
-save(cs, file = "chains/weevil_random_trt_proc_error.RData")
-``` 
-
-The first time I fit the full model, I accidently misspecified the precision as the standard error. Other than having "sd" estimates that were wrong, the fit seemed fine (all plots on left hand side). I fixed the error and estimated sd correctly. However, now the chains have really odd behavior (plots on right hand side). I'm not sure why there would be such a massive difference from run-to-run.
-
-```{r out.width="50%", fig.show="hold"}
-load("chains/weevil_random_trt_proc_error_weird.RData")
-cs_weird <- cs
-load("chains/weevil_random_trt_proc_error.RData")
-mcmc_trace(cs)
-mcmc_trace(cs_weird)
-```
-
-
-```{r out.width="50%", fig.show="hold"}
-gelman.plot(cs)
-gelman.plot(cs_weird)
-```
-
-On one of the runs, the chains appeard to converge (left) although there was still autocorrelation in the chains. However, on another run, it doesn't even look like the chains converged (right) and the chains were getting stuck.
-
-```{r out.width="50%", fig.show="hold"}
-mcmc_dens_overlay(cs)
-mcmc_dens_overlay(cs_weird)
-```
-
-```{r out.width="50%", fig.show="hold"}
-mcmc_acf(cs)
-mcmc_acf(cs_weird)
-```
-
-```{r}
-MCMCsummary(cs) %>% knitr::kable(digits = 2)
-MCMCsummary(cs_weird) %>% knitr::kable(digits = 2)
-```
-
-```{r eval = FALSE}
-rbind(cs[[1]],cs[[2]],cs[[3]]) %>% as_tibble() %>%
-  mutate(tau_a = sd_a,
-         tau_b = sd_b,
-         sd_a = 1/sqrt(tau_a),
-         sd_b = 1/sqrt(tau_b)) %>%
-  summarise(sd_a = mean(sd_a),
-            sd_b = mean(sd_b))
-```
-
-
-```{r}
-knitr::knit_exit()
-```
-
-# nope
 
 ```{r}
 weevil_0 <- 
