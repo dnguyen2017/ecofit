@@ -22,10 +22,22 @@ theme_set(theme_bw())
 color_scheme_set("viridis")
 
 weevil <- read_csv("weevil_data\\lagged_weevil.csv", col_types = cols(.default = "d", rep_trt = "c", ftreatment = "f", freplicate = "f"))
+
+# get row index of the begining and end of observations association with each treatment
+# needed to compute treatment specific quantities in JAGS
+trt_index <-
+  weevil %>% mutate(rowid = row_number()) %>%
+  group_by(ftreatment) %>%
+  filter(rowid == min(rowid) | rowid == max(rowid)) %>%
+  summarise(init_index = min(rowid),
+            end_index = max(rowid))
+
+# arrange weevil so that observation are in correct order for JAGs analysis
 weevil <- 
   weevil %>% 
   mutate(freptrt = ftreatment:freplicate) %>%
   arrange(freptrt)
+
 ```
 
 ```{r munge_data, include = FALSE, eval = FALSE}
@@ -130,11 +142,11 @@ weevil <-
 weevil <- weevil %>%
   select(-cumtotal, -max_cumtotal) %>%
   group_by(replicate, treatment) %>%
-  mutate( N_lag5 = total,
-          N_lag4 = lead(N_lag5),
-          N_lag3 = lead(N_lag4),
-          N_lag2 = lead(N_lag3),
-          N_lag1 = lead(N_lag2),
+  mutate( #N_lag5 = total,
+          #N_lag4 = lead(N_lag5),
+          #N_lag3 = lead(N_lag4),
+          #N_lag2 = lead(N_lag3),
+          N_lag1 = lead(total),
           N_lag0 = lead(N_lag1)) %>%
   filter(!is.na(N_lag0)) %>%
   # make rep and trt into factor and standardize days 
@@ -152,24 +164,36 @@ write_csv(weevil, "weevil_data/lagged_weevil.csv")
 test <- tibble(N = 1:10)
 
 test %>%
-  mutate(N_5 = N,
-         N_4 = lead(N_5),
-         N_3 = lead(N_4),
-         N_2 = lead(N_3),
-         N_1 = lead(N_2),
+  mutate(#N_5 = N,
+         #N_4 = lead(N_5),
+         #N_3 = lead(N_4),
+         #N_2 = lead(N_3),
+         N_1 = lead(N),
          N_0 = lead(N_1)) %>%
   filter(!is.na(N_0))
 ```
 
 ```{r define_sim_gomp}
-sim_log_gomp <- function (xinit,     # initial log population size
+sim_log_gomp <- function (init,     # initial population size
                      lambda, # population growth rate,
                      b,      # density dependence
                      sd_proc, # process noise: N(0, sd_proc)
                      tfinal,
-                     nsim,
-                     replicate,
-                     ftreatment) {
+                     nsim = 1,
+                     replicate = NA,
+                     ftreatment = NA) {
+  # break if init == 0
+  if (init == 0) {
+    return(tibble(time = 1,
+                  log_x = NA_real_,
+                  N = init,
+                  lambda = lambda,
+                  b_ = b,
+                  sd_proc = sd_proc,
+                  replicate = replicate,
+                  ftreatment = ftreatment)
+    )
+  }
   
   # init storage list for all simulation
   sim_list <- vector("list", length = nsim)
@@ -177,17 +201,21 @@ sim_log_gomp <- function (xinit,     # initial log population size
   for (i in seq_along(sim_list)) {
     # init storage for current simulation
     log_x <- vector("numeric", length = tfinal)
-    log_x[1] <- xinit
+    N <- log_x
+    log_x[1] <- log(init)
+    N[1] <- init
     
     # sim population dynamics
     for (j in 2:tfinal) {
       proc_error <- rnorm(n = 1, mean = 0, sd = sd_proc)
-      log_x[j] <- lambda + b * log_x[j-1] + proc_error
+      z <- lambda + b * log_x[j-1] + proc_error
+      N[j] <- rpois(1, exp(z))
+      log_x[j] <- ifelse(log(N[j]) == -Inf, break, log(N[j]))
     }
     # save current simulation
     sim_list[[i]] <- (tidyr::tibble(time = 1:tfinal,
                                     log_x = log_x,
-                                    N = exp(log_x),
+                                    N = N,
                                     lambda = lambda,
                                     b_ = b,
                                     sd_proc = sd_proc,
@@ -201,11 +229,13 @@ sim_log_gomp <- function (xinit,     # initial log population size
 
 
 ```{r}
-weevil %>%
+base_weevil <- 
+  weevil %>%
   ggplot(aes(x = days, y = N_lag0, group = freplicate)) +
   geom_line() +
-  facet_wrap(~ftreatment) +
-  labs(title = "Bean weevil abundances",
+  facet_wrap(~ftreatment)
+  
+base_weevil + labs(title = "Bean weevil abundances",
        y = "adult weevil abundance",
        x = "days after treatment began")
 ```
@@ -273,7 +303,9 @@ data <-
   replicate = as.numeric(weevil$replicate), # nx1 vector of replicate numbers for each observation
   sreplicate = as.numeric(1:10), # replicate numbers
   treatment = as.numeric(weevil$ftreatment), # nx1 vector of treatment levels for each observation
-  streatment = as.numeric(1:4) # treatment levels
+  streatment = as.numeric(1:4), # treatment levels
+  start_index = as.numeric(trt_index$init_index), # 1st obs. number for trt 1:4
+  end_index = as.numeric(trt_index$end_index) # last obs. number for trt 1:4
 )
 
 inits <-
@@ -283,20 +315,30 @@ inits <-
     list(mu_a = rep(1.5, 4), mu_b = rep(0.9, 4), tau_a = 1/100, tau_b = 1/100, tau_p = 0.005)
   )
 
-variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")
+variablenames <- c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K", #"n_new", 
+                   "ts_cv", "ts_new_cv", "indicator_cv",
+                   "ts_max", "ts_new_max", "indicator_max")
 modelstring="
 model{
   #likelihood
   for (t in 1:length(n)){
     z[t] ~ dnorm(a[treatment[t], replicate[t]] + b[treatment[t], replicate[t]]*lnlag1[t], tau_p)
     n[t] ~ dpois(exp(z[t]))
+  
+    # posterior predictive dist. Uses new values for a and b for each replicate
+    z_new[t] ~ dnorm(a_new[treatment[t], replicate[t]] + b_new[treatment[t], replicate[t]]*lnlag1[t], tau_p)
+    n_new[t] ~ dpois(exp(z_new[t]))
   }
   
-  # priors
+  # draw a and b's
   for (i in 1:length(streatment)) {
   for (j in 1:length(sreplicate)) {
       a[i, j] ~ dnorm(mu_a[i], tau_a)
       b[i, j] ~ dnorm(mu_b[i], tau_b)
+
+      # get new a and b for replicates for posterior predictive dist'n
+      a_new[i, j] ~ dnorm(mu_a[i], tau_a)
+      b_new[i, j] ~ dnorm(mu_b[i], tau_b)
   }
   }
   # prior for mean a and b
@@ -316,41 +358,77 @@ model{
   sd_p <- 1/sqrt(tau_p)
 
   # Derived quantity
-  for (i in 1:4) {
+  for (i in 1:length(streatment)) {
     K[i] <- exp(mu_a[i]/(1-mu_b[i]))
+  }
+
+  # compute test statistics for each treatment group
+  for (i in 1:length(streatment)) {
+    # coefficient of variation
+    ts_cv[i] <- mean(n[start_index[i]:end_index[i]]) / sd(n[start_index[i]:end_index[i]])
+    ts_new_cv[i] <- mean(n_new[start_index[i]:end_index[i]]) / sd(n_new[start_index[i]:end_index[i]])
+    indicator_cv[i] <- ifelse(ts_new_cv[i] > ts_cv[i], 1, 0)
+
+    # coefficient of variation
+    ts_max[i] <- max(n[start_index[i]:end_index[i]])
+    ts_new_max[i] <- max(n_new[start_index[i]:end_index[i]])
+    indicator_max[i] <- ifelse(ts_new_max[i] > ts_max[i], 1, 0)
   }
 }"
 
 jm = jags.model(textConnection(modelstring),data,inits,n.chains=length(inits),n.adapt=1000) #create model in R
 update(jm, n.iter=10000) #burn-in
-cs = coda.samples(jm,variable.names = variablenames,n.iter=10000) #generate chains
-#save(cs, file = "chains/weevil_random_trt_proc_error.RData")
+cs = coda.samples(jm,variable.names = variablenames,n.iter=30000) #generate chains
+save(cs, file = "chains/weevil_random_trt_proc_error.RData")
 ``` 
 
 ### Checking convergence
 
 ```{r trace_plots}
 load("chains/weevil_random_trt_proc_error.RData")
-mcmc_trace(cs)
+mcmc_trace(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
-```{r gr_plots}
-gelman.plot(cs)
+```{r gr_plots, eval = FALSE}
+gelman.plot(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
 ```{r dens_chain}
-mcmc_dens_overlay(cs)
+mcmc_dens_overlay(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
 ```{r acf_chain}
-mcmc_acf(cs)
+mcmc_acf(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
 ```{r}
-MCMCsummary(cs) %>% knitr::kable(digits = 2)
+MCMCsummary(cs, params = c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")) %>% knitr::kable(digits = 2)
 ```
 
 ### Model Checking
+```{r}
+# cv: ts and pvalues
+tibble(treatment = c(0, 0.05, 0.1, 0.15),
+       ts_obs = colMeans(combine.mcmc(cs, var = c("ts_cv"))),
+       ts_pred = colMeans(combine.mcmc(cs, var = c("ts_new_cv"))),
+       p_value = colMeans(combine.mcmc(cs, var = c("indicator_cv")))) %>%
+  knitr::kable()
+```
+
+```{r}
+# max: ts and pvalues
+tibble(treatment = c(0, 0.05, 0.1, 0.15),
+       ts_obs = colMeans(combine.mcmc(cs, var = c("ts_max"))),
+       ts_pred = colMeans(combine.mcmc(cs, var = c("ts_new_max"))),
+       p_value = colMeans(combine.mcmc(cs, var = c("indicator_max")))) %>%
+  knitr::kable()
+```
+
+
+```{r eval = FALSE}
+rbind(cs[[1]],cs[[2]],cs[[3]]) %>% as_tibble()
+```
+
 
 ### Inferences
 
@@ -388,6 +466,154 @@ ls_estimates %>%
   select(treatment, parameter, `estimate (95 % CI)`) %>%
   pivot_wider(names_from = parameter, values_from = `estimate (95 % CI)`) %>%
   knitr::kable(caption = "Parameter estimates from previous model: treatment specific variance")
+```
+
+```{r}
+# table of parameter estimates
+param_est <- 
+  MCMCsummary(cs, params = c("mu_a","mu_b","sd_p"), Rhat = FALSE, n.eff = FALSE) %>% 
+  rownames_to_column()
+    
+ab <- param_est %>%
+  filter(rowname != "sd_p") %>%
+  add_column(ftreatment = factor(rep(c(0, 0.05, 0.1, 0.15), 2)),
+             estimate = rep(c("population growth rate (a)", "density dependence (b)"), each = 4) )
+sd_est <- 
+  param_est %>% filter(rowname == "sd_p") %>% 
+  add_column(estimate = "process noise (sd)") %>%
+  mutate(`estimate (95 % CrI)` = paste(round(`50%`,2), " (", round(`2.5%`,2), ", ", round(`97.5%`,2), ")" )) %>%
+  select(estimate, `estimate (95 % CrI)`)
+sd_est <- rbind(sd_est,sd_est,sd_est,sd_est) %>% add_column(ftreatment = factor(c(0, 0.05, 0.1, 0.15)))
+
+sd_df <- sd_est%>% pivot_wider(names_from = estimate, values_from = `estimate (95 % CrI)`)
+
+ab_df <- ab %>% select(-rowname, -mean, -sd) %>%
+  mutate(`estimate (95 % CrI)` = paste(round(`50%`,2), " (", round(`2.5%`,2), ", ", round(`97.5%`,2), ")" )) %>%
+  select(ftreatment, estimate, `estimate (95 % CrI)`) %>%
+  pivot_wider(names_from = estimate, values_from = `estimate (95 % CrI)`)
+
+inner_join(ab_df, sd_df, by = "ftreatment") %>% select(treatment = ftreatment, 3, 2, 4) %>%
+  knitr::kable(caption = "Parameter estimates from hierarchical bayes model")
+```
+
+
+```{r}
+init_pop <-
+  weevil %>%
+  group_by(ftreatment, replicate) %>% 
+  mutate(tfinal = (last(days) - first(days)) / 4) %>% # divide by 4 because weevils were counted every 4 days
+  filter(days == first(days)) %>%
+  group_by(ftreatment) %>%
+  select(ftreatment, replicate, N0 = N_lag0, tfinal)
+
+temp_ab <- param_est %>%
+  filter(rowname != "sd_p") %>%
+  add_column(ftreatment = factor(rep(c(0, 0.05, 0.1, 0.15), 2)),
+             estimate = rep(c("a", "b"), each = 4) ) %>%
+  select(ftreatment, estimate, mean) %>%
+  pivot_wider(names_from = estimate, values_from = mean)
+
+temp_sd <- param_est %>% filter(rowname == "sd_p")
+temp_sd <- rbind(temp_sd, temp_sd, temp_sd, temp_sd) %>%
+  add_column(ftreatment = factor(c(0, 0.05, 0.1, 0.15))) %>%
+  select(ftreatment, estimate = rowname, mean) %>%
+  pivot_wider(names_from = estimate, values_from = mean)
+
+param_df <- inner_join(temp_ab, temp_sd, by = "ftreatment")
+
+# join initial values and parameter estimates (mean of posterior)
+param_df <- inner_join(init_pop, param_df, by = "ftreatment")
+
+# run simulations
+# 1 sim for each replicate
+sim_weevil <-
+  lapply(1:nrow(param_df), function(x)
+  sim_log_gomp(init = param_df$N0[x], lambda = param_df$a[x], b = param_df$b[x], sd_proc = param_df$sd_p[x], tfinal = param_df$tfinal[x], replicate = param_df$replicate[x], ftreatment = param_df$ftreatment[x])
+  )  %>% bind_rows()
+```
+
+```{r}
+ggplot() +
+  geom_line(sim_weevil, mapping = aes(x = (time * 4) + 28, y = N, group = replicate), col = "red", alpha = 0.5) +
+  geom_line(weevil, mapping = aes(x = days, y = N_lag0, group = replicate)) +
+  facet_wrap(~ftreatment, nrow = 2) +
+  labs(title = "HB Gompertz model: comparison of observed and predicted abundances",
+       y = "Adult weevil abundance",
+       x = "time since treatment (days)",
+       caption = "red: simulated abundance, black: observed abundance")
+```
+
+```{r, out.width = "500px", fig.cap="Log-Gompertz model estimated by GLS"}
+knitr::include_graphics("pics/log_gomp_fit.png")
+```
+
+```{r}
+K_est <- MCMCsummary(cs, params = c("K"), Rhat = FALSE, n.eff = FALSE) %>% 
+  tibble(ftreatment = factor(c(0, 0.05, 0.1, 0.15)))
+
+inner_join(weevil, K_est, by = "ftreatment") %>%
+  ggplot() +
+  geom_line(aes(x = days, y = N_lag0, group = freplicate)) +
+  geom_ribbon(aes(x = days, ymin = `2.5%`, ymax = `97.5%`),alpha = 0.5, fill = "red") +
+  facet_wrap(~ftreatment) +
+  labs(title = "Model prediction: expected carrying capacity",
+       subtitle = "95 % credible interval",
+       y = "adult weevil abundance",
+       x = "days after treatment began")
+  
+```
+
+```{r}
+ggplot() +
+  geom_line(data = filter(sim_weevil, ftreatment == 0), mapping = aes(x = time*4+ 28, y = N),
+            col = "red", alpha = 0.5) +
+  geom_line(data = filter(weevil, ftreatment == 0), mapping = aes(x = days, y = N_lag0, group = replicate)) +
+  facet_wrap(~replicate) +
+   labs(title = "Gompertz model simulations with parameters from top model",
+        subtitle = "0 % peanut shell",
+       y = "Abundance of adult bean weevil",
+         x = "Days since beginning of treatment",
+       caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
+```
+
+```{r}
+ggplot() +
+  geom_line(data = filter(sim_weevil, ftreatment == 0.05), mapping = aes(x = time*4+ 28, y = N),
+            col = "red", alpha = 0.5) +
+  geom_line(data = filter(weevil, ftreatment == 0.05), mapping = aes(x = days, y = N_lag0, group = replicate)) +
+  facet_wrap(~replicate) +
+   labs(title = "Gompertz model simulations with parameters from top model",
+        subtitle = "5 % peanut shell",
+       y = "Abundance of adult bean weevil",
+         x = "Days since beginning of treatment",
+       caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
+```
+
+
+```{r}
+ggplot() +
+  geom_line(data = filter(sim_weevil, ftreatment == 0.1), mapping = aes(x = time*4+ 28, y = N),
+            col = "red", alpha = 0.5) +
+  geom_line(data = filter(weevil, ftreatment == 0.1), mapping = aes(x = days, y = N_lag0, group = replicate)) +
+  facet_wrap(~replicate) +
+   labs(title = "Gompertz model simulations with parameters from top model",
+        subtitle = "10 % peanut shell",
+       y = "Abundance of adult bean weevil",
+         x = "Days since beginning of treatment",
+       caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
+```
+
+```{r}
+ggplot() +
+  geom_line(data = filter(sim_weevil, ftreatment == 0.15), mapping = aes(x = time*4+ 28, y = N),
+            col = "red", alpha = 0.5) +
+  geom_line(data = filter(weevil, ftreatment == 0.15), mapping = aes(x = days, y = N_lag0, group = replicate)) +
+  facet_wrap(~replicate) +
+   labs(title = "Gompertz model simulations with parameters from top model",
+        subtitle = "15 % peanut shell",
+       y = "Abundance of adult bean weevil",
+         x = "Days since beginning of treatment",
+       caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
 
 
