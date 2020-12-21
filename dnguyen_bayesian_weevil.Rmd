@@ -19,7 +19,6 @@ library(mcmcplots)
 library(MCMCvis)
 library(bayesplot)
 theme_set(theme_bw())
-color_scheme_set("viridis")
 
 weevil <- read_csv("weevil_data\\lagged_weevil.csv", col_types = cols(.default = "d", rep_trt = "c", ftreatment = "f", freplicate = "f"))
 
@@ -227,6 +226,7 @@ sim_log_gomp <- function (init,     # initial population size
 }
 ```
 
+# Data
 
 ```{r}
 base_weevil <- 
@@ -240,36 +240,42 @@ base_weevil + labs(title = "Bean weevil abundances",
        x = "days after treatment began")
 ```
 
+* Response: Census of adult weevils every 4 days
+* Treatment: food quality (0, 5, 10 , 15 % peanut shell)
+* Experimental design: 10 replicates per treatment level = 40 populationsx
+    + Pure bean pellets and 4 adult weevils added every 4 days up to day 28
+    + Day 32 treatment begins. Food added every 7 days.
+
 # Model
 
 ```{r, out.width = "500px"}
-knitr::include_graphics("pics/full_dag.png")
+knitr::include_graphics("pics/dag_direct_density.png")
 ```
 
 ### Definitions
 
 * $n_{ij,t}:$ the adult weevil count for treatment $i$, replicate $j$, and time $t$
-* $n_{ij,t-k:t-1}:$ the adult weevil count for treatment $i$, replicate $j$, and times $t-k,\ldots,t-1$ where $k$ is the largest population lag
+* $n_{ij,t-1}:$ the adult weevil count for treatment $i$, replicate $j$, and time $t-1$  lag
 * $z_{ij,t}:$ The expected number of adult weevils for treatment $i$, replicate $j$, and time $t$
 * $\alpha_{ij}:$  treatment specific population growth rate in replicate $j$
-* $\beta_{ijk}:$  effect of previous population size at $t-k$ on expected number of adult weevils at time $t$ for treatment $i$ in replicate $j$
+* $\beta_{ij}:$  effect of previous population size at $t-1$ on expected number of adult weevils at time $t$ for treatment $i$ in replicate $j$
 * $\mu_{\alpha,i}:$ the mean population growth rate for treatment $i$
-* $\mu_{\beta_{ik}}:$ the mean effect of previous population size at $t-k$ on expected number of adult weevils at time $t$ for treatment $i$
+* $\mu_{\beta_{i}}:$ the mean effect of previous population size at $t-1$ on expected number of adult weevils at time $t$ for treatment $i$
 * $\sigma_{\alpha}^2:$ variance of distribution of population growth rates
 * $\sigma_{\beta}^2:$ variance of distribution of density dependence magnitudes (maybe should make it specific to lag $k$?)
 
 ### Gompertz process model
 \begin{align}
-N_t & = N_{t-1}\exp(\alpha + \prod_{i=1}^k \beta_i\ln(N_{t-i})) \\
-    & = g(\alpha,\beta_1, \ldots, \beta_k, n_{t-1}, \ldots, n_{t-k}) \\
+N_t & = N_{t-1}\exp(\alpha + \beta\ln(N_{t-1})) \\
+    & = g(\alpha,\beta, n_{t-1}) \\
 \end{align}
 
 But, note that when $N_{t-1}=0$, then all subsequent abundances will be zero.
 
 The log-gompertz model (might?) be more useful for estimation since we no longer multiply by $N_{t-1}$.
 \begin{align}
-X_t & = \alpha +  \prod_{i=1}^k \beta_i\ln(X_{t-i})\\
-    & = g(\alpha,\beta_1, \ldots, \beta_k, n_{t-1}, \ldots, n_{t-k}) \\
+X_t & = \alpha +  \beta X_{t-1}\\
+    & = g(\alpha,\beta, n_{t-1}) \\
 \end{align}
 
 Note that $\beta_1$ in the log-gompertz is technically $(1+\beta_1)$ for the model on arithmetic (not-logged) scale.
@@ -278,15 +284,16 @@ Note that $\beta_1$ in the log-gompertz is technically $(1+\beta_1)$ for the mod
 
 \begin{align}
 [\boldsymbol{\alpha, \beta, \mu_{\alpha}, \mu_{\beta}},Z, \sigma_{p}^2, \sigma_{\alpha}^2, \sigma_{\beta}^2| \boldsymbol{N}] \propto  
-                                                    \prod_{i=1}^{4} \prod_{j=1}^{J_{ij}} \prod_{k=1}^5 \prod_{t=1}^{T_{ij}} 
-                                                  & \text{Poisson}[n_{ij,t} | Z_{ij,t}]\\
-                                                  & \text{lognormal}(Z_{ij,t} | g(\alpha_{i},\beta_{ik},n_{ij,t-5}, \ldots, n_{ij,t-1}), \sigma_p^2)\\
+                                                    \prod_{i=1}^{4} \prod_{j=1}^{J_{ij}} \prod_{t=1}^{T_{ij}} 
+                                                  & \text{Poisson}[n_{ij,t} | \exp(Z_{ij,t})]\\
+                                                  & \text{normal}(Z_{ij,t} | g(\alpha_{i},\beta_{ik},n_{ij,t-1}, \ldots, n_{ij,t-1}), \sigma_p^2)\\
                                                   & \text{N}[\alpha_{ij} | \mu_{\alpha,i}, \sigma_{\alpha}^2] \\
-                                                  & \text{N}[\beta_{ijk} | \mu_{\beta_{ik}}, \sigma_{\beta}^2] \\
+                                                  & \text{N}[\beta_{ij} | \mu_{\beta_{i}}, \sigma_{\beta}^2] \\
                                                   & \text{Unif}[\mu_{\alpha,i} | 0, 3] \\
                                                   & \text{Unif}[\mu_{\beta_{ik}} | -1.1, 1.1] \\
                                                   & \text{inv.gamma}[\sigma_{\alpha}^2 | 0.001, 0.001] \\
                                                   & \text{inv.gamma}[\sigma_{\beta}^2 | 0.001, 0.001] \\
+                                                  & \text{inv.gamma}[\sigma_{p}^2 | 0.001, 0.001] \\
 \end{align}
 
 # Model fitting: Direct density dependence
@@ -331,6 +338,7 @@ model{
   }
   
   # draw a and b's
+  # store in a 4 x 10 matrix (rows are treatment levels, cols are replicate number)
   for (i in 1:length(streatment)) {
   for (j in 1:length(sreplicate)) {
       a[i, j] ~ dnorm(mu_a[i], tau_a)
@@ -341,23 +349,23 @@ model{
       b_new[i, j] ~ dnorm(mu_b[i], tau_b)
   }
   }
-  # prior for mean a and b
+  # Draw for mean of treatment specific a and b
   for (i in 1:length(streatment)) {
       mu_a[i] ~ dunif(0,3)
       mu_b[i] ~ dunif(-1.1, 1.1)
   }
 
-  # prior for sd
+  # Draw for precisions
   tau_a ~ dgamma(0.001, 0.001)
   tau_b ~ dgamma(0.001, 0.001)
   tau_p ~ dgamma(0.001, 0.001) # same process error across treatments
 
-  # get sd
+  # convert precision to sd
   sd_a <- 1/sqrt(tau_a)
   sd_b <- 1/sqrt(tau_b)
   sd_p <- 1/sqrt(tau_p)
 
-  # Derived quantity
+  # Compute carrying capacity
   for (i in 1:length(streatment)) {
     K[i] <- exp(mu_a[i]/(1-mu_b[i]))
   }
@@ -369,7 +377,7 @@ model{
     ts_new_cv[i] <- mean(n_new[start_index[i]:end_index[i]]) / sd(n_new[start_index[i]:end_index[i]])
     indicator_cv[i] <- ifelse(ts_new_cv[i] > ts_cv[i], 1, 0)
 
-    # coefficient of variation
+    # Max abundance
     ts_max[i] <- max(n[start_index[i]:end_index[i]])
     ts_new_max[i] <- max(n_new[start_index[i]:end_index[i]])
     indicator_max[i] <- ifelse(ts_new_max[i] > ts_max[i], 1, 0)
@@ -382,38 +390,57 @@ cs = coda.samples(jm,variable.names = variablenames,n.iter=30000) #generate chai
 save(cs, file = "chains/weevil_random_trt_proc_error.RData")
 ``` 
 
-### Checking convergence
+# Checking convergence
 
-```{r trace_plots}
+### trace plots
+```{r trace_plots, echo = TRUE}
 load("chains/weevil_random_trt_proc_error.RData")
-mcmc_trace(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
+color_scheme_set("viridis")
+bayesplot::mcmc_trace(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
 ```{r gr_plots, eval = FALSE}
 gelman.plot(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
-```{r dens_chain}
-mcmc_dens_overlay(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
+
+### density plots
+```{r dens_chain, echo = TRUE}
+bayesplot::mcmc_dens_overlay(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
-```{r acf_chain}
-mcmc_acf(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
+### autocorrelation of chains
+```{r acf_chain, echo = TRUE}
+bayesplot::mcmc_acf(cs, pars = vars(starts_with(c("mu", "sd", "K"))))
 ```
 
-```{r}
-MCMCsummary(cs, params = c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")) %>% knitr::kable(digits = 2)
+
+### R-hat and effective sample size
+```{r echo = TRUE}
+MCMCvis::MCMCsummary(cs, params = c("mu_a","mu_b", "sd_a","sd_b", "sd_p", "K")) %>% knitr::kable(digits = 2)
+#lapply(cs, coda::effectiveSize) %>% dplyr::bind_rows() #%>% summarise_all(funs(sum))# can also comput n.eff like this
 ```
+
+* $\hat R:$ measures ratio average variance within change compared to across chains.
+* Effective sample size: measures how much autocorrelation in chains increases uncertainty in estimates of posterior
+    + how large does my $N_{eff}$ need to be? Not sure - see mcmcse
+
 
 ### Model Checking
+
+Coefficient of variation: $CV_i = \mu_i/\sigma_i$
+
 ```{r}
 # cv: ts and pvalues
 tibble(treatment = c(0, 0.05, 0.1, 0.15),
        ts_obs = colMeans(combine.mcmc(cs, var = c("ts_cv"))),
        ts_pred = colMeans(combine.mcmc(cs, var = c("ts_new_cv"))),
        p_value = colMeans(combine.mcmc(cs, var = c("indicator_cv")))) %>%
-  knitr::kable()
+  knitr::kable(caption = "Posterior predictive check: coefficient of variation")
 ```
+
+
+Maximum: $\text{max}(\boldsymbol{n_i})$
 
 ```{r}
 # max: ts and pvalues
@@ -421,16 +448,54 @@ tibble(treatment = c(0, 0.05, 0.1, 0.15),
        ts_obs = colMeans(combine.mcmc(cs, var = c("ts_max"))),
        ts_pred = colMeans(combine.mcmc(cs, var = c("ts_new_max"))),
        p_value = colMeans(combine.mcmc(cs, var = c("indicator_max")))) %>%
-  knitr::kable()
+  knitr::kable(caption = "Posterior predictive check: max abundance")
 ```
 
 
-```{r eval = FALSE}
-rbind(cs[[1]],cs[[2]],cs[[3]]) %>% as_tibble()
+# Comparing models
+
+$X_{ij,t} = a_i + b_i X_{ij,t-1}+N(0,\sigma_i^2)$, for treatment $i = 1,2,3,4$, replicate $j = 1,\ldots,10$.
+
+* Both
+    + Gompertz with direct density dependence
+* Bayesian
+    + response is poisson with lognormal process error
+    + random effect of treatment (variation among replicates)
+    + shared parameters: $\sigma_a, \sigma_b, \sigma_p$ 
+* GLS
+    + response is lognormal
+    + fixed effect of treatments (no random effect of replicate)
+    + treatment specific residual (process error)
+
+### Parameter estimates
+
+```{r}
+# table of parameter estimates
+param_est <- 
+  MCMCsummary(cs, params = c("mu_a","mu_b","sd_p"), Rhat = FALSE, n.eff = FALSE) %>% 
+  rownames_to_column()
+    
+ab <- param_est %>%
+  filter(rowname != "sd_p") %>%
+  add_column(ftreatment = factor(rep(c(0, 0.05, 0.1, 0.15), 2)),
+             estimate = rep(c("population growth rate (a)", "density dependence (b)"), each = 4) )
+sd_est <- 
+  param_est %>% filter(rowname == "sd_p") %>% 
+  add_column(estimate = "process noise (sd)") %>%
+  mutate(`estimate (95 % CrI)` = paste(round(`50%`,2), " (", round(`2.5%`,2), ", ", round(`97.5%`,2), ")" )) %>%
+  select(estimate, `estimate (95 % CrI)`)
+sd_est <- rbind(sd_est,sd_est,sd_est,sd_est) %>% add_column(ftreatment = factor(c(0, 0.05, 0.1, 0.15)))
+
+sd_df <- sd_est%>% pivot_wider(names_from = estimate, values_from = `estimate (95 % CrI)`)
+
+ab_df <- ab %>% select(-rowname, -mean, -sd) %>%
+  mutate(`estimate (95 % CrI)` = paste(round(`50%`,2), " (", round(`2.5%`,2), ", ", round(`97.5%`,2), ")" )) %>%
+  select(ftreatment, estimate, `estimate (95 % CrI)`) %>%
+  pivot_wider(names_from = estimate, values_from = `estimate (95 % CrI)`)
+
+inner_join(ab_df, sd_df, by = "ftreatment") %>% select(treatment = ftreatment, 3, 2, 4) %>%
+  knitr::kable(caption = "Parameter estimates from hierarchical bayes model")
 ```
-
-
-### Inferences
 
 ```{r}
 ls_estimates <- structure(list(coefficient = c("l_total", "ftreatment0", "ftreatment0.05", 
@@ -466,34 +531,6 @@ ls_estimates %>%
   select(treatment, parameter, `estimate (95 % CI)`) %>%
   pivot_wider(names_from = parameter, values_from = `estimate (95 % CI)`) %>%
   knitr::kable(caption = "Parameter estimates from previous model: treatment specific variance")
-```
-
-```{r}
-# table of parameter estimates
-param_est <- 
-  MCMCsummary(cs, params = c("mu_a","mu_b","sd_p"), Rhat = FALSE, n.eff = FALSE) %>% 
-  rownames_to_column()
-    
-ab <- param_est %>%
-  filter(rowname != "sd_p") %>%
-  add_column(ftreatment = factor(rep(c(0, 0.05, 0.1, 0.15), 2)),
-             estimate = rep(c("population growth rate (a)", "density dependence (b)"), each = 4) )
-sd_est <- 
-  param_est %>% filter(rowname == "sd_p") %>% 
-  add_column(estimate = "process noise (sd)") %>%
-  mutate(`estimate (95 % CrI)` = paste(round(`50%`,2), " (", round(`2.5%`,2), ", ", round(`97.5%`,2), ")" )) %>%
-  select(estimate, `estimate (95 % CrI)`)
-sd_est <- rbind(sd_est,sd_est,sd_est,sd_est) %>% add_column(ftreatment = factor(c(0, 0.05, 0.1, 0.15)))
-
-sd_df <- sd_est%>% pivot_wider(names_from = estimate, values_from = `estimate (95 % CrI)`)
-
-ab_df <- ab %>% select(-rowname, -mean, -sd) %>%
-  mutate(`estimate (95 % CrI)` = paste(round(`50%`,2), " (", round(`2.5%`,2), ", ", round(`97.5%`,2), ")" )) %>%
-  select(ftreatment, estimate, `estimate (95 % CrI)`) %>%
-  pivot_wider(names_from = estimate, values_from = `estimate (95 % CrI)`)
-
-inner_join(ab_df, sd_df, by = "ftreatment") %>% select(treatment = ftreatment, 3, 2, 4) %>%
-  knitr::kable(caption = "Parameter estimates from hierarchical bayes model")
 ```
 
 
@@ -532,6 +569,8 @@ sim_weevil <-
   )  %>% bind_rows()
 ```
 
+### Comparison of model predictions
+
 ```{r}
 ggplot() +
   geom_line(sim_weevil, mapping = aes(x = (time * 4) + 28, y = N, group = replicate), col = "red", alpha = 0.5) +
@@ -543,9 +582,11 @@ ggplot() +
        caption = "red: simulated abundance, black: observed abundance")
 ```
 
-```{r, out.width = "500px", fig.cap="Log-Gompertz model estimated by GLS"}
+```{r, out.width = "700px", fig.cap="Log-Gompertz model estimated by GLS"}
 knitr::include_graphics("pics/log_gomp_fit.png")
 ```
+
+# 95% CrI of carrying capacity (derived quantity)
 
 ```{r}
 K_est <- MCMCsummary(cs, params = c("K"), Rhat = FALSE, n.eff = FALSE) %>% 
@@ -562,6 +603,8 @@ inner_join(weevil, K_est, by = "ftreatment") %>%
        x = "days after treatment began")
   
 ```
+
+# Predictions for individual replicates
 
 ```{r}
 ggplot() +
@@ -616,16 +659,13 @@ ggplot() +
        caption = "1 simulation per replicate.\nSimulations conditioned on inital population size in each replicate.")
 ```
 
+# Final thoughts
 
-```{r eval = FALSE}
-rbind(cs[[1]],cs[[2]],cs[[3]]) %>% as_tibble() %>%
-  mutate(tau_a = sd_a,
-         tau_b = sd_b,
-         sd_a = 1/sqrt(tau_a),
-         sd_b = 1/sqrt(tau_b)) %>%
-  summarise(sd_a = mean(sd_a),
-            sd_b = mean(sd_b))
-```
+* Modeling populations as discrete vs continuous
+* Delayed density dependence
+* Latent stages
+* Look into effective sample size and monte carlo error
+
 
 ```{r}
 knitr::knit_exit()
